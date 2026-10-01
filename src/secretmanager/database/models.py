@@ -1,0 +1,66 @@
+from datetime import date, datetime, time
+
+from sqlalchemy import CheckConstraint, Date, DateTime, Integer, LargeBinary, String, Text, Time
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class SecretModel(Base):
+    __tablename__ = "secrets"
+    __table_args__ = (
+        CheckConstraint(
+            "expires_at_time IS NULL OR expires_on IS NOT NULL",
+            name="ck_secrets_expiry_time_requires_date",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+    )
+
+    value: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False,
+    )
+
+    value_nonce: Mapped[bytes] = mapped_column(
+        LargeBinary,
+        nullable=False,
+    )
+
+    note: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+
+    expires_on: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    expires_at_time: Mapped[time | None] = mapped_column(
+        Time,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+    )
