@@ -3,11 +3,12 @@ import sys
 
 
 def get_portable_root() -> Path:
-    """Return the application root for source and onedir portable builds."""
+    """Return the application root for source and portable bundle layouts."""
     if getattr(sys, "frozen", False):
         executable_dir = Path(sys.executable).resolve().parent
-        if executable_dir.name.casefold() == "app":
-            return executable_dir.parent
+        for candidate in (executable_dir, executable_dir.parent):
+            if candidate.name.casefold() == "app":
+                return candidate.parent
         return executable_dir
 
     # Editable/source installs use the project root, independent of cwd.

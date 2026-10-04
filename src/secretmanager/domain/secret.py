@@ -8,3 +8,4 @@ class Secret:
     note: str = ""
     expires_on: date | None = None
     expires_at_time: time | None = None
+    allow_cli: bool = False

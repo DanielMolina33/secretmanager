@@ -6,8 +6,8 @@ from qfluentwidgets import (
     SettingCardGroup,
     SwitchSettingCard,
     Theme,
-    qconfig,
 )
+from ..settings_config import app_config
 
 
 class SettingsPage(QWidget):
@@ -24,12 +24,12 @@ class SettingsPage(QWidget):
         group = SettingCardGroup('Personalización', self)
 
         self.mica_card = SwitchSettingCard(
+            configItem=app_config.micaEnabled,
             icon=FIF.TRANSPARENT,
             title='Efecto Mica',
             content='Aplica un material semitransparente a las ventanas y superficies.',
             parent=group,
         )
-        self.mica_card.setChecked(mica_available)
         self.mica_card.switchButton.setEnabled(mica_available)
         if not mica_available:
             self.mica_card.switchButton.setToolTip(
@@ -43,10 +43,10 @@ class SettingsPage(QWidget):
             Theme.DARK: 'Oscuro',
             Theme.AUTO: 'Usar configuración del sistema',
         }
-        theme_options = qconfig.themeMode.options
+        theme_options = app_config.themeMode.options
 
         self.theme_card = ComboBoxSettingCard(
-            configItem=qconfig.themeMode,
+            configItem=app_config.themeMode,
             icon=FIF.BRUSH,
             title='Tema de la aplicación',
             content='Cambia la apariencia de la aplicación.',

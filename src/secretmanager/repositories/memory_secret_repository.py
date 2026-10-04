@@ -44,3 +44,4 @@ class InMemorySecretRepository(SecretRepository):
         current.note = secret.note
         current.expires_on = secret.expires_on
         current.expires_at_time = secret.expires_at_time
+        current.allow_cli = secret.allow_cli

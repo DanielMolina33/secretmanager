@@ -15,6 +15,8 @@ from qfluentwidgets import (
 from qfluentwidgets.common.style_sheet import updateStyleSheet
 from qframelesswindow.utils import getSystemAccentColor
 
+from ..settings_config import app_config
+
 try:
     # winaccent is a Windows-only dependency; import by name to keep this
     # module usable on macOS and Linux.
@@ -31,9 +33,14 @@ class ThemeManager:
     """Owns Fluent theme selection and system appearance synchronization."""
 
     MODES = ("system", "light", "dark")
+    THEME_MODES = {
+        Theme.AUTO: "system",
+        Theme.LIGHT: "light",
+        Theme.DARK: "dark",
+    }
 
     def __init__(self, parent):
-        self.mode = "system"
+        self.mode = self.THEME_MODES[app_config.themeMode.value]
         self.listener = SystemThemeListener(parent)
         self.listener.systemThemeChanged.connect(self._system_theme_changed)
         self.listener.start()

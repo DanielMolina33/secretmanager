@@ -1,8 +1,9 @@
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBadge, InfoLevel, MessageBox, PrimaryPushButton, RoundMenu, SearchLineEdit, SegmentedWidget, TableWidget, TitleLabel, TransparentToolButton
 from ..domain.exceptions import DuplicateSecretError, EmptySecretValueError, InvalidSecretNameError
+from ..domain.expiry import EXPIRED, EXPIRING, VALID, get_expiry_status
 from .secret_dialog import SecretDialog
 from .vault_locked_view import VaultLockedView
 
@@ -271,26 +272,13 @@ class SecretsPage(QWidget):
 
     @staticmethod
     def _secret_status(secret):
-        expires_on = secret.expires_on
-        if expires_on is None:
-            return ('Vigente', InfoLevel.SUCCESS)
-
-        now = datetime.now()
-        if secret.expires_at_time is None:
-            today = date.today()
-            if today < expires_on:
-                return ('Vigente', InfoLevel.SUCCESS)
-            if today == expires_on:
-                return ('Por vencer', InfoLevel.WARNING)
-            return ('Vencido', InfoLevel.ERROR)
-
-        expires_at = datetime.combine(expires_on, secret.expires_at_time)
-        warning_starts_at = expires_at - timedelta(minutes=5)
-        if now < warning_starts_at:
-            return ('Vigente', InfoLevel.SUCCESS)
-        if now < expires_at:
-            return ('Por vencer', InfoLevel.WARNING)
-        return ('Vencido', InfoLevel.ERROR)
+        status = get_expiry_status(secret.expires_on, secret.expires_at_time)
+        levels = {
+            VALID: InfoLevel.SUCCESS,
+            EXPIRING: InfoLevel.WARNING,
+            EXPIRED: InfoLevel.ERROR,
+        }
+        return status, levels[status]
 
     def add_secret(self):
         service = self.secret_service
@@ -304,6 +292,7 @@ class SecretsPage(QWidget):
                 note=data["note"],
                 expires_on=data["expires_on"],
                 expires_at_time=data["expires_at_time"],
+                allow_cli=data["allow_cli"],
             )
         )
         if self._exec_secret_dialog(dialog) != QDialog.DialogCode.Accepted:
@@ -340,6 +329,7 @@ class SecretsPage(QWidget):
                 note=data["note"],
                 expires_on=data["expires_on"],
                 expires_at_time=data["expires_at_time"],
+                allow_cli=data["allow_cli"],
             )
         )
         if self._exec_secret_dialog(dialog) != QDialog.DialogCode.Accepted:

@@ -1,12 +1,12 @@
 import sys
 from PySide6.QtWidgets import QApplication
-from qfluentwidgets import Theme, setTheme
+from .settings_config import load_app_config
 from .ui.main_window import MainWindow
 
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName('Secret Manager')
-    setTheme(Theme.AUTO)
+    load_app_config()
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

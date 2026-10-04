@@ -24,6 +24,7 @@ class SecretService:
         note: str = "",
         expires_on: date | None = None,
         expires_at_time: time | None = None,
+        allow_cli: bool = False,
     ) -> Secret:
         self._validate_name(name)
         self._validate_value(value)
@@ -40,6 +41,7 @@ class SecretService:
             note=note,
             expires_on=expires_on,
             expires_at_time=expires_at_time,
+            allow_cli=allow_cli,
         )
 
         self.repository.save(secret)
@@ -60,6 +62,7 @@ class SecretService:
         note: str = "",
         expires_on: date | None = None,
         expires_at_time: time | None = None,
+        allow_cli: bool | None = None,
     ) -> Secret:
         secret = self.get(current_name)
 
@@ -81,6 +84,7 @@ class SecretService:
             note=note,
             expires_on=expires_on,
             expires_at_time=expires_at_time,
+            allow_cli=secret.allow_cli if allow_cli is None else allow_cli,
         )
 
         self.repository.update(

@@ -39,6 +39,7 @@ class PhaseZeroIpcTests(unittest.TestCase):
         self.secret_service.create(
             name="PHASE0_KEY",
             value=self.sample_value,
+            allow_cli=True,
         )
         self.server = LocalSecretServer(
             self.data_dir,
@@ -85,11 +86,11 @@ class PhaseZeroIpcTests(unittest.TestCase):
                 pass
 
     def test_no_secret_value_is_written_to_data_directory(self):
-        expected_names = {"ipc-token", "vault.db"}
+        expected_names = {".ipc-token", "vault.db"}
         if self.server.family == "AF_UNIX":
             expected_names.add("secretmanager.sock")
         self.assertEqual({path.name for path in self.data_dir.iterdir()}, expected_names)
-        self.assertNotEqual((self.data_dir / "ipc-token").read_bytes(), self.sample_value.encode())
+        self.assertNotEqual((self.data_dir / ".ipc-token").read_bytes(), self.sample_value.encode())
 
     def test_cli_module_does_not_import_qt(self):
         environment = os.environ.copy()

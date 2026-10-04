@@ -39,6 +39,7 @@ class SqliteSecretRepository(SecretRepository):
             note=secret.note,
             expires_on=secret.expires_on,
             expires_at_time=secret.expires_at_time,
+            allow_cli=secret.allow_cli,
             created_at=now,
             updated_at=now,
         )
@@ -94,6 +95,7 @@ class SqliteSecretRepository(SecretRepository):
             model.note = secret.note
             model.expires_on = secret.expires_on
             model.expires_at_time = secret.expires_at_time
+            model.allow_cli = secret.allow_cli
             model.updated_at = datetime.now()
 
     def delete(self, name: str) -> bool:
@@ -125,4 +127,5 @@ class SqliteSecretRepository(SecretRepository):
             note=model.note,
             expires_on=model.expires_on,
             expires_at_time=model.expires_at_time,
+            allow_cli=model.allow_cli,
         )

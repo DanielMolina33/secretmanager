@@ -1,6 +1,6 @@
 from datetime import date, datetime, time
 
-from sqlalchemy import CheckConstraint, Date, DateTime, Integer, LargeBinary, String, Text, Time
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Integer, LargeBinary, String, Text, Time
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -14,6 +14,10 @@ class SecretModel(Base):
         CheckConstraint(
             "expires_at_time IS NULL OR expires_on IS NOT NULL",
             name="ck_secrets_expiry_time_requires_date",
+        ),
+        CheckConstraint(
+            "allow_cli IN (0, 1)",
+            name="ck_secrets_allow_cli_boolean",
         ),
     )
 
@@ -53,6 +57,13 @@ class SecretModel(Base):
     expires_at_time: Mapped[time | None] = mapped_column(
         Time,
         nullable=True,
+    )
+
+    allow_cli: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
     )
 
     created_at: Mapped[datetime] = mapped_column(

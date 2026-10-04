@@ -1,7 +1,7 @@
 from datetime import date, time
 
 from PySide6.QtCore import QDate, QDateTime, QTime, Qt
-from PySide6.QtWidgets import QVBoxLayout
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
 
 from ..domain.exceptions import (
     DuplicateSecretError,
@@ -11,14 +11,18 @@ from ..domain.exceptions import (
 from qfluentwidgets import (
     CalendarPicker,
     CheckBox,
+    FluentIcon as FIF,
     CaptionLabel,
     LineEdit,
     MessageBoxBase,
     PasswordLineEdit,
     SubtitleLabel,
+    TransparentToolButton,
     SwitchButton,
     TimeEdit,
     TextEdit,
+    ToolTipFilter,
+    ToolTipPosition,
 )
 
 
@@ -81,6 +85,30 @@ class SecretDialog(MessageBoxBase):
         self.value_input.textChanged.connect(
             lambda _text: self.clear_error("value")
         )
+
+        self.cli_permission = SwitchButton("Permitir uso desde CLI", self)
+        self.cli_permission.setOffText("Permitir uso desde CLI")
+        self.cli_permission.setOnText("Permitir uso desde CLI")
+
+        self.cli_info_button = TransparentToolButton(FIF.INFO, self)
+        self.cli_info_button.setAccessibleName("Información sobre uso desde CLI")
+        self.cli_info_button.setToolTip(
+            "Cuando está habilitado, este secreto podrá ser solicitado y usado\n"
+            "desde la CLI (con el comando run -- use)"
+        )
+        self.cli_info_tooltip = ToolTipFilter(
+            self.cli_info_button,
+            showDelay=300,
+            position=ToolTipPosition.RIGHT,
+        )
+        self.cli_info_button.installEventFilter(self.cli_info_tooltip)
+
+        self.cli_permission_layout = QHBoxLayout()
+        self.cli_permission_layout.setContentsMargins(0, 0, 0, 0)
+        self.cli_permission_layout.setSpacing(4)
+        self.cli_permission_layout.addWidget(self.cli_permission)
+        self.cli_permission_layout.addWidget(self.cli_info_button)
+        self.cli_permission_layout.addStretch(1)
 
         self.note_input = TextEdit(self)
         self.note_input.setPlaceholderText(
@@ -147,6 +175,8 @@ class SecretDialog(MessageBoxBase):
             self.value_input,
             self.value_error,
         )
+        self.viewLayout.addLayout(self.cli_permission_layout)
+        self.viewLayout.addSpacing(4)
 
         self._add_field(
             "Nota",
@@ -206,6 +236,7 @@ class SecretDialog(MessageBoxBase):
             self.note_input.setPlainText(
                 secret.note
             )
+            self.cli_permission.setChecked(secret.allow_cli)
 
             if secret.expires_on is not None:
                 self.expiry_enabled.setChecked(True)
@@ -304,6 +335,7 @@ class SecretDialog(MessageBoxBase):
             "note": self.note_input.toPlainText(),
             "expires_on": expires_on,
             "expires_at_time": expires_at_time,
+            "allow_cli": self.cli_permission.isChecked(),
         }
 
     def clear_sensitive_data(self):

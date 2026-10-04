@@ -12,6 +12,7 @@ from .settings_page import SettingsPage
 from .theme_manager import ThemeManager
 from ..ipc import LocalSecretServer
 from ..paths import get_data_dir
+from ..settings_config import app_config
 from ..vault_manager import VaultManager
 class MainWindow(FluentWindow):
     # Estos valores existen incluso durante super().__init__().
@@ -69,10 +70,10 @@ class MainWindow(FluentWindow):
 
 
     def closeEvent(self, event):
+        database, self.database = self.database, None
         self._stop_ipc_server()
-        if self.database is not None:
-            self.database.close()
-            self.database = None
+        if database is not None:
+            database.close()
         if self.vault is not None:
             self.vault.lock()
         self.auto_lock_timer.stop()
@@ -283,9 +284,9 @@ class MainWindow(FluentWindow):
 
     def _stop_ipc_server(self):
         server = getattr(self, "ipc_server", None)
+        self.ipc_server = None
         if server is not None:
             server.close()
-            self.ipc_server = None
 
     def _lock_vault(self):
         vault = getattr(
@@ -309,12 +310,11 @@ class MainWindow(FluentWindow):
         if timer is not None:
             timer.stop()
 
+        database, self.database = self.database, None
         self._stop_ipc_server()
+        if database is not None:
+            database.close()
         self.secrets_page.reject_active_secret_dialog()
-
-        if self.database is not None:
-            self.database.close()
-            self.database = None
 
         vault.lock()
 
@@ -369,6 +369,7 @@ class MainWindow(FluentWindow):
         self.settings_page.setObjectName("settingsPage")
         self.settings_page.themeChanged.connect(self._theme_selection_changed)
         self.settings_page.micaChanged.connect(self.setMicaEffectEnabled)
+        self.setMicaEffectEnabled(app_config.micaEnabled.value)
 
     def _configure_navigation(self):
         self.addSubInterface(
