@@ -35,7 +35,8 @@ class MainWindow(FluentWindow):
 
         self.setWindowTitle("Secret Manager")
         self.setMinimumSize(900, 600)
-        self.resize(1100, 700)
+        self.resize(900, 600)
+        # self.resize(1100, 700)
 
         self.auto_lock_timeout = 5 * 60 * 1000
 

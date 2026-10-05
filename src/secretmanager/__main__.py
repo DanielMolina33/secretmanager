@@ -15,8 +15,7 @@ def main() -> int:
 
     from .app import main as app_main
 
-    app_main()
-    return 0
+    return app_main()
 
 
 if __name__ == "__main__":
