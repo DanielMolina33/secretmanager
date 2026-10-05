@@ -34,6 +34,11 @@ class Vault:
     def lock(self) -> None:
         self._dek = None
 
+    def replace_protected_key(self, protected_key: ProtectedKey) -> None:
+        if self._dek is None:
+            raise RuntimeError("Vault is locked.")
+        self._protected_key = protected_key
+
     def get_dek(self) -> bytes:
         if self._dek is None:
             raise RuntimeError(

@@ -5,6 +5,8 @@ from argon2.low_level import (
     hash_secret_raw,
 )
 
+from ..domain.master_password import normalize_master_password
+
 
 SALT_SIZE = 16
 KEY_SIZE = 32
@@ -31,7 +33,7 @@ def derive_key(
         )
 
     return hash_secret_raw(
-        secret=password.encode("utf-8"),
+        secret=normalize_master_password(password).encode("utf-8"),
         salt=salt,
         time_cost=TIME_COST,
         memory_cost=MEMORY_COST,

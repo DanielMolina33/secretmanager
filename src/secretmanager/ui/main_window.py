@@ -7,6 +7,12 @@ from ..database.database import Database
 from ..repositories.sqlite_secret_repository import SqliteSecretRepository
 from ..services.secret_service import SecretService
 from .master_password_dialog import MasterPasswordDialog
+from .master_password_change_dialog import MasterPasswordChangeDialog
+from .recovery_kit_dialog import (
+    MasterPasswordConfirmationDialog,
+    RecoveryDialog,
+    RecoveryKitDisplayDialog,
+)
 from .secrets_page import SecretsPage
 from .settings_page import SettingsPage
 from .theme_manager import ThemeManager
@@ -238,13 +244,25 @@ class MainWindow(FluentWindow):
         dialog = MasterPasswordDialog(
             self,
             create_mode=False,
+            recovery_available=self.vault_manager.recovery_configured,
         )
         dialog.set_password_validator(self.vault_manager.unlock)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        dialog.start_unlock_cooldown(self.vault_manager.unlock_cooldown_remaining)
+        result = dialog.exec()
+        if dialog.recovery_requested:
+            dialog.clear_sensitive_data()
+            recovery_dialog = RecoveryDialog(self.vault_manager.recover, self)
+            if recovery_dialog.exec() != QDialog.DialogCode.Accepted:
+                recovery_dialog.clear_sensitive_data()
+                return False
+            self.vault = recovery_dialog.recovered_vault
+            recovery_dialog.clear_sensitive_data()
+        elif result == QDialog.DialogCode.Accepted:
+            self.vault = dialog.authenticated_value
+            dialog.clear_sensitive_data()
+        else:
             dialog.clear_sensitive_data()
             return False
-        self.vault = dialog.authenticated_value
-        dialog.clear_sensitive_data()
 
         self.database = Database(
             self.vault_manager.database_path,
@@ -353,6 +371,12 @@ class MainWindow(FluentWindow):
         self.lock_shortcut.setEnabled(unlocked)
         self.lock_button.setVisible(unlocked)
         self.secrets_page.set_unlocked(unlocked)
+        if hasattr(self, "settings_page"):
+            self.settings_page.set_master_password_state(unlocked)
+            self.settings_page.set_recovery_state(
+                self.vault_manager.recovery_configured,
+                unlocked,
+            )
 
     # ------------------------------------------------------------------
     # Pages
@@ -369,6 +393,16 @@ class MainWindow(FluentWindow):
         self.settings_page.setObjectName("settingsPage")
         self.settings_page.themeChanged.connect(self._theme_selection_changed)
         self.settings_page.micaChanged.connect(self.setMicaEffectEnabled)
+        self.settings_page.configureRecoveryRequested.connect(self._configure_recovery_kit)
+        self.settings_page.disableRecoveryRequested.connect(self._disable_recovery_kit)
+        self.settings_page.changeMasterPasswordRequested.connect(self._change_master_password)
+        self.settings_page.set_master_password_state(
+            self.vault is not None and self.vault.is_unlocked,
+        )
+        self.settings_page.set_recovery_state(
+            self.vault_manager.recovery_configured,
+            self.vault is not None and self.vault.is_unlocked,
+        )
         self.setMicaEffectEnabled(app_config.micaEnabled.value)
 
     def _configure_navigation(self):
@@ -392,6 +426,65 @@ class MainWindow(FluentWindow):
             selectable=False,
             position=NavigationItemPosition.BOTTOM,
         )
+    def _change_master_password(self):
+        if self.vault is None or not self.vault.is_unlocked:
+            return
+
+        dialog = MasterPasswordChangeDialog(self)
+        dialog.set_change_handler(self.vault_manager.change_master_password)
+        try:
+            dialog.exec()
+        finally:
+            dialog.clear_sensitive_data()
+
+    def _configure_recovery_kit(self):
+        if self.vault is None or not self.vault.is_unlocked:
+            return
+
+        replacing = self.vault_manager.recovery_configured
+        content = (
+            "Confirma tu contraseña maestra para preparar otro kit. El kit actual seguirá válido hasta que guardes el nuevo."
+            if replacing
+            else "Confirma tu contraseña maestra para configurar un kit opcional de recuperación."
+        )
+        password_dialog = MasterPasswordConfirmationDialog(
+            self,
+            title="Confirmar contraseña maestra",
+            content=content,
+            action_text="Continuar",
+        )
+        password_dialog.set_validator(self.vault_manager.prepare_recovery_kit)
+        if password_dialog.exec() != QDialog.DialogCode.Accepted:
+            password_dialog.clear_sensitive_data()
+            return
+
+        pending = password_dialog.authenticated_value
+        password_dialog.clear_sensitive_data()
+        kit_dialog = RecoveryKitDisplayDialog(
+            pending.code,
+            lambda: self.vault_manager.commit_recovery_kit(pending),
+            self,
+            replacing=replacing,
+        )
+        if kit_dialog.exec() == QDialog.DialogCode.Accepted:
+            self.settings_page.set_recovery_state(True, True)
+        kit_dialog.clear_sensitive_data()
+
+    def _disable_recovery_kit(self):
+        if self.vault is None or not self.vault.is_unlocked:
+            return
+
+        dialog = MasterPasswordConfirmationDialog(
+            self,
+            title="Desactivar recovery kit",
+            content="Confirma tu contraseña maestra. El kit dejará de permitir el acceso a esta bóveda.",
+            action_text="Desactivar",
+        )
+        dialog.set_validator(self.vault_manager.disable_recovery_kit)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.settings_page.set_recovery_state(False, True)
+        dialog.clear_sensitive_data()
+
     def _configure_shortcuts(self):
         self.lock_shortcut = QShortcut(
             QKeySequence(
