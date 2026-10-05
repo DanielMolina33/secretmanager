@@ -19,6 +19,7 @@ from .theme_manager import ThemeManager
 from ..ipc import LocalSecretServer
 from ..paths import get_data_dir
 from ..settings_config import app_config
+from ..system_events import SystemEventMonitor
 from ..vault_manager import VaultManager
 class MainWindow(FluentWindow):
     # Estos valores existen incluso durante super().__init__().
@@ -54,6 +55,10 @@ class MainWindow(FluentWindow):
         self._build_pages()
         self._configure_navigation()
         self._configure_shortcuts()
+        self.system_event_monitor = SystemEventMonitor(self, self)
+        self.system_event_monitor.lockRequested.connect(
+            self._lock_vault
+        )
         self._update_vault_ui()
 
         # IMPORTANTE:
@@ -77,6 +82,14 @@ class MainWindow(FluentWindow):
 
 
     def closeEvent(self, event):
+        system_event_monitor = getattr(
+            self,
+            "system_event_monitor",
+            None,
+        )
+        if system_event_monitor is not None:
+            system_event_monitor.close()
+
         database, self.database = self.database, None
         self._stop_ipc_server()
         if database is not None:

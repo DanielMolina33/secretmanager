@@ -6,8 +6,8 @@ datas += collect_data_files('qfluentwidgets')
 
 
 a = Analysis(
-    ['//192.168.18.32/Files$/Development/SecretManager/packaging/windows/entrypoints/desktop.py'],
-    pathex=['//192.168.18.32/Files$/Development/SecretManager/src'],
+    ['//192.168.18.38/Files$/Development/SecretManager/packaging/windows/entrypoints/desktop.py'],
+    pathex=['//192.168.18.38/Files$/Development/SecretManager/src'],
     binaries=[],
     datas=datas,
     hiddenimports=['winaccent'],
