@@ -8,6 +8,8 @@ $outputRoot = Join-Path $projectRoot "dist\SecretManager"
 $appOutput = Join-Path $outputRoot "app"
 $buildRoot = Join-Path $projectRoot "build\windows-packaging"
 $sourceRoot = Join-Path $projectRoot "src"
+$translationSources = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.ts" }
+$translationBinaries = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.qm" }
 $desktopEntry = Join-Path $PSScriptRoot "entrypoints\desktop.py"
 $cliEntry = Join-Path $PSScriptRoot "entrypoints\cli.py"
 
@@ -31,6 +33,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 if ([string]$pyinstallerVersion -ne "6.22.3") {
     throw "Expected locked PyInstaller 6.22.3, found $pyinstallerVersion."
+}
+
+$lrelease = Join-Path (Split-Path -Parent $python) "pyside6-lrelease.exe"
+if (-not (Test-Path -LiteralPath $lrelease -PathType Leaf)) {
+    throw "Qt Linguist compiler was not found in the Poetry environment: $lrelease"
+}
+Write-Host "Compiling the UI translation catalogs..."
+for ($index = 0; $index -lt $translationSources.Count; $index++) {
+    & $lrelease $translationSources[$index] -qm $translationBinaries[$index]
+    if ($LASTEXITCODE -ne 0) {
+        throw "Qt Linguist catalog compilation failed with exit code $LASTEXITCODE."
+    }
 }
 
 function Remove-OwnedOutput([string] $path) {
@@ -69,6 +83,8 @@ $desktopArguments = $commonArguments + @(
     "--name", "SecretManager",
     "--hidden-import", "winaccent",
     "--collect-data", "qfluentwidgets",
+    "--add-data", "$($translationBinaries[0]);secretmanager/localization/translations",
+    "--add-data", "$($translationBinaries[1]);secretmanager/localization/translations",
     "--workpath", (Join-Path $buildRoot "desktop"),
     "--specpath", (Join-Path $buildRoot "spec\desktop"),
     $desktopEntry

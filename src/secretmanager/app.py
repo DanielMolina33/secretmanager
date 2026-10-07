@@ -37,11 +37,14 @@ def main() -> int:
     try:
         # Settings and vault services are initialized only after the process
         # owns the global instance lock.
-        from .settings_config import load_app_config
+        from .settings_config import app_config, load_app_config
+        from .localization.language_manager import LanguageManager
         from .ui.main_window import MainWindow
 
         load_app_config()
+        language_manager = LanguageManager(app, app_config.language.value)
         window = MainWindow()
+        window.language_manager = language_manager
         instance.activated.connect(lambda: _activate_window(window))
         window.show()
         return app.exec()

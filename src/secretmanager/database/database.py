@@ -46,6 +46,11 @@ class Database:
             connection.execute(
                 f"PRAGMA key = \"x'{key_hex}'\""
             )
+            connection.create_function(
+                "secretmanager_lower",
+                1,
+                lambda value: value.lower() if value is not None else "",
+            )
 
             return connection
 

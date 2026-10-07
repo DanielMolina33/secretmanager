@@ -21,6 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from PySide6.QtCore import QTranslator
 from PySide6.QtWidgets import QApplication, QWidget
 from secretmanager import cli, ipc
 from secretmanager.database.database import Database
@@ -32,7 +33,7 @@ from secretmanager.ipc import (
 )
 from secretmanager.repositories.sqlite_secret_repository import SqliteSecretRepository
 from secretmanager.services.secret_service import SecretService
-from secretmanager.ui.secret_dialog import SecretDialog
+from secretmanager.ui.dialogs.secret_dialog import SecretDialog
 
 
 class CliPermissionTests(unittest.TestCase):
@@ -238,6 +239,10 @@ class CliPermissionTests(unittest.TestCase):
             0o600,
         )
     def test_fluent_dialog_exposes_switch_and_exact_tooltip(self):
+        translator = QTranslator()
+        catalog = ROOT / "src" / "secretmanager" / "localization" / "translations" / "secretmanager_es.qm"
+        self.assertTrue(translator.load(str(catalog)))
+        QApplication.instance().installTranslator(translator)
         parent = QWidget()
         parent.resize(600, 700)
         dialog = SecretDialog(parent)
@@ -245,8 +250,10 @@ class CliPermissionTests(unittest.TestCase):
             self.assertFalse(dialog.cli_permission.isChecked())
             self.assertEqual(
                 dialog.cli_info_button.toolTip(),
-                "Cuando está habilitado, este secreto podrá ser solicitado y usado "
-                "desde la CLI (por ejemplo, con el comando run -- use)",
+                translator.translate(
+                    "SecretManager",
+                    "ui.when_enabled_this_secret_can_be_requested_and_used_f",
+                ),
             )
             dialog.cli_permission.setChecked(True)
             self.assertTrue(dialog.get_data()["allow_cli"])
@@ -254,6 +261,7 @@ class CliPermissionTests(unittest.TestCase):
             dialog.clear_sensitive_data()
             dialog.close()
             parent.close()
+            QApplication.instance().removeTranslator(translator)
 
 
 if __name__ == "__main__":

@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     expiring = [name for name in names if grants[name].status == EXPIRING]
     if expiring:
         print(
-            "Warning: secret(s) are expiring soon (Por vencer): "
+            "Warning: secret(s) are expiring soon: "
             + ", ".join(expiring)
             + ".",
             file=sys.stderr,

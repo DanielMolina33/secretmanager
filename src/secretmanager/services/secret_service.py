@@ -1,5 +1,5 @@
 import re
-from datetime import date, time
+from datetime import date, datetime, time
 from ..repositories.secret_repository import SecretRepository
 
 from ..domain.exceptions import (
@@ -8,6 +8,7 @@ from ..domain.exceptions import (
     InvalidSecretNameError,
 )
 from ..domain.secret import Secret
+from ..domain.secret_listing import SecretListPage
 
 
 SECRET_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -50,6 +51,32 @@ class SecretService:
 
     def list(self) -> list[Secret]:
         return self.repository.list()
+
+    def list_page(
+        self,
+        *,
+        search_text: str = "",
+        status: str = "all",
+        descending: bool = False,
+        page_index: int = 0,
+        page_size: int = 25,
+        now: datetime | None = None,
+    ) -> SecretListPage:
+        return self.repository.list_page(
+            search_text=search_text,
+            status=status,
+            descending=descending,
+            page_index=page_index,
+            page_size=page_size,
+            now=now,
+        )
+
+    def next_status_transition(
+        self,
+        *,
+        now: datetime | None = None,
+    ) -> datetime | None:
+        return self.repository.next_status_transition(now=now)
 
     def get(self, name: str) -> Secret | None:
         return self.repository.get(name)

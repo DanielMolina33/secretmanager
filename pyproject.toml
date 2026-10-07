@@ -29,6 +29,10 @@ build-backend = "poetry.core.masonry.api"
 packages = [
     { include = "secretmanager", from = "src" }
 ]
+include = [
+    { path = "src/secretmanager/localization/translations/secretmanager_es.qm", format = ["sdist", "wheel"] },
+    { path = "src/secretmanager/localization/translations/secretmanager_en.qm", format = ["sdist", "wheel"] },
+]
 
 [dependency-groups]
 build = [
