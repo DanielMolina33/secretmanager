@@ -1,6 +1,7 @@
 [project]
 name = "secretmanager"
 version = "1.0.0"
+license = "GPL-3.0-only"
 description = "Portable offline secret manager for developers"
 authors = [
     {name = "Jose Daniel Molina"}
