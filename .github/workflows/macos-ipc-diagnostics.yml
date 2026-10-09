@@ -1,0 +1,67 @@
+name: macOS IPC diagnostics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-suite:
+    name: Full suite with fault diagnostics
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONFAULTHANDLER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: poetry.lock
+      - name: Install Poetry
+        run: python -m pip install poetry
+      - name: Install project dependencies
+        run: poetry install --no-interaction
+      - name: Run complete suite with faulthandler
+        run: poetry run python -X faulthandler -m unittest discover -s tests -p "test_*.py" -v
+
+  isolated-tests:
+    name: ${{ matrix.case.name }}
+    runs-on: macos-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - name: CLI cancellation during vault lock
+            file: tests/test_cli_permission.py
+            method: CliPermissionTests.test_lock_cancels_cli_request_without_waiting_or_starting_child
+          - name: Concurrent CLI clients
+            file: tests/test_cli_permission.py
+            method: CliPermissionTests.test_simultaneous_clients_receive_only_their_requested_grants
+          - name: GUI and IPC lifecycle
+            file: tests/test_gui_ipc.py
+            method: GuiIpcLifecycleTests.test_unlocked_window_starts_cli_worker_and_lock_removes_ipc_access
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONFAULTHANDLER: "1"
+      TEST_FILE: ${{ matrix.case.file }}
+      TEST_METHOD: ${{ matrix.case.method }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: poetry.lock
+      - name: Install Poetry
+        run: python -m pip install poetry
+      - name: Install project dependencies
+        run: poetry install --no-interaction
+      - name: Run isolated test with faulthandler
+        run: poetry run python -X faulthandler "$TEST_FILE" "$TEST_METHOD"
