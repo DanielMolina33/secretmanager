@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -9,6 +10,11 @@ from PySide6.QtWidgets import QApplication
 from qfluentwidgets import FluentWindow, Theme, setTheme
 
 
+@unittest.skipIf(
+    sys.platform == "darwin"
+    and os.environ.get("QT_QPA_PLATFORM") == "offscreen",
+    "The macOS frameless-window smoke test requires the native Cocoa QPA plugin.",
+)
 class PhaseZeroQtTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -46,8 +46,12 @@ jobs:
           - name: GUI and IPC lifecycle
             file: tests/test_gui_ipc.py
             method: GuiIpcLifecycleTests.test_unlock_lock_lifecycle_starts_worker_and_removes_ipc_access
+          - name: Qt native window smoke
+            file: tests/test_qt.py
+            method: PhaseZeroQtTests.test_py_side_and_fluent_window_initialize_portably
+            qt_platform: cocoa
     env:
-      QT_QPA_PLATFORM: offscreen
+      QT_QPA_PLATFORM: ${{ matrix.case.qt_platform || 'offscreen' }}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONFAULTHANDLER: "1"
       TEST_FILE: ${{ matrix.case.file }}
