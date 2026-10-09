@@ -6,6 +6,15 @@ def get_portable_root() -> Path:
     """Return the application root for source and portable bundle layouts."""
     if getattr(sys, "frozen", False):
         executable_dir = Path(sys.executable).resolve().parent
+
+        # PyInstaller places a windowed macOS executable inside
+        # <app>.app/Contents/MacOS. Keep portable data beside the bundle,
+        # using the surrounding `app` directory as the package layout marker.
+        for parent in executable_dir.parents:
+            if parent.suffix.casefold() == ".app":
+                package_root = parent.parent
+                return package_root.parent if package_root.name.casefold() == "app" else package_root
+
         for candidate in (executable_dir, executable_dir.parent):
             if candidate.name.casefold() == "app":
                 return candidate.parent

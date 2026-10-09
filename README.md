@@ -4,11 +4,11 @@ SecretManager is a portable, offline secret manager for developers. It stores se
 
 ## Download
 
-Portable Windows builds are published as ZIP files in GitHub Releases. Extract the ZIP and run the desktop application from the extracted folder. Keep the whole folder together when moving the application.
+Portable pre-release builds are packaged separately for each operating system. Extract the matching archive and run the desktop application from its folder. Keep the whole folder together when moving the application.
 
 The Windows build is currently unsigned, so Windows may show a SmartScreen warning for an unrecognized app. Download releases only from the project's official release page and compare the published SHA-256 checksum with the file you downloaded.
 
-Builds for macOS and Linux are not published yet. The source includes platform-specific code, but each platform needs its own packaged build and release checks.
+The macOS and Linux packages must be built on their native runners; see the `Build SecretManager v1.0.1-alpha` GitHub Actions workflow.
 
 ## Portable data and backups
 
@@ -37,12 +37,16 @@ poetry install --with build
 .\packaging\windows\build_windows.ps1
 ```
 
-The output is `dist\SecretManager`. The package contains:
+The output is `dist\SecretManager-v1.0.1-alpha\windows`. The package contains:
 
 - `app\SecretManager\SecretManager.exe` — desktop application.
 - `app\SecretManagerCLI\SecretManagerCLI.exe` — command-line launcher.
 
-The build script performs isolated GUI and CLI smoke checks. It replaces generated executable folders and build caches while preserving `dist\SecretManager\data`.
+The build script performs isolated GUI and CLI smoke checks. The GUI and CLI executables both use the SecretManager icon, and the versioned ZIP is created beside the platform folder.
+
+## Build for Linux and macOS
+
+These builds must run on Linux and macOS hosts. The `Build SecretManager v1.0.1-alpha` workflow builds on native GitHub-hosted runners and uploads versioned archives for each platform.
 
 ## Source installation
 

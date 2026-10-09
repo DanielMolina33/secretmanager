@@ -4,9 +4,11 @@ param()
 $ErrorActionPreference = "Stop"
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $projectPrefix = $projectRoot.TrimEnd("\") + "\"
-$outputRoot = Join-Path $projectRoot "dist\SecretManager"
+$releaseName = "SecretManager-v1.0.1-alpha"
+$releaseRoot = Join-Path $projectRoot "dist\$releaseName"
+$outputRoot = Join-Path $releaseRoot "windows"
 $appOutput = Join-Path $outputRoot "app"
-$buildRoot = Join-Path $projectRoot "build\windows-packaging"
+$buildRoot = Join-Path $projectRoot "build\$releaseName\windows"
 $sourceRoot = Join-Path $projectRoot "src"
 $translationSources = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.ts" }
 $translationBinaries = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.qm" }
@@ -21,7 +23,7 @@ if ($null -eq $poetry) {
     throw "Poetry is required. Install Poetry and run this script again."
 }
 
-$pythonLines = @(& $poetry.Source -C $projectRoot env info --executable 2>$null)
+$pythonLines = @(& $poetry.Source --no-plugins -C $projectRoot env info --executable 2>$null)
 if ($LASTEXITCODE -ne 0 -or $pythonLines.Count -eq 0) {
     throw "Could not locate the project's Poetry environment. Run: poetry install --with build"
 }
@@ -64,10 +66,7 @@ function Remove-OwnedOutput([string] $path) {
 # so rebuilding can never erase the user's portable vault.
 Remove-OwnedOutput (Join-Path $appOutput "SecretManager")
 Remove-OwnedOutput (Join-Path $appOutput "SecretManagerCLI")
-Remove-OwnedOutput (Join-Path $buildRoot "desktop")
-Remove-OwnedOutput (Join-Path $buildRoot "cli")
-Remove-OwnedOutput (Join-Path $buildRoot "spec\desktop")
-Remove-OwnedOutput (Join-Path $buildRoot "spec\cli")
+Remove-OwnedOutput $buildRoot
 
 $null = New-Item -ItemType Directory -Path $appOutput -Force
 $null = New-Item -ItemType Directory -Path $buildRoot -Force
@@ -105,6 +104,8 @@ if ($LASTEXITCODE -ne 0) {
 
 $cliArguments = $commonArguments + @(
     "--console",
+    "--icon", $windowsIcon,
+    "--add-data", "$($windowIcon);secretmanager/resources/icons",
     "--name", "SecretManagerCLI",
     "--workpath", (Join-Path $buildRoot "cli"),
     "--specpath", (Join-Path $buildRoot "spec\cli"),
@@ -133,4 +134,10 @@ if ($LASTEXITCODE -ne 0) {
     throw "The isolated bundle smoke checks failed with exit code $LASTEXITCODE."
 }
 
+$archive = Join-Path $releaseRoot "$releaseName-windows.zip"
+if (Test-Path -LiteralPath $archive) {
+    Remove-OwnedOutput $archive
+}
+Compress-Archive -Path (Join-Path $outputRoot "app") -DestinationPath $archive -CompressionLevel Optimal
 Write-Host "Portable Windows package ready: $outputRoot"
+Write-Host "Windows distribution archive ready: $archive"
