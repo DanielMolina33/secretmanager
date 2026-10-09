@@ -45,7 +45,7 @@ jobs:
             method: CliPermissionTests.test_simultaneous_clients_receive_only_their_requested_grants
           - name: GUI and IPC lifecycle
             file: tests/test_gui_ipc.py
-            method: GuiIpcLifecycleTests.test_unlocked_window_starts_cli_worker_and_lock_removes_ipc_access
+            method: GuiIpcLifecycleTests.test_unlock_lock_lifecycle_starts_worker_and_removes_ipc_access
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONDONTWRITEBYTECODE: "1"

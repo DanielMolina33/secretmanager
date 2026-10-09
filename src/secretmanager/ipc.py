@@ -27,6 +27,7 @@ SOCKET_FILENAME = "secretmanager.sock"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_SECRET_NAMES = 128
+LISTENER_BACKLOG = 32
 
 
 def _mark_token_hidden_on_windows(path: Path) -> None:
@@ -176,6 +177,9 @@ class LocalSecretServer:
         listener = Listener(
             self.address,
             family=self.family,
+            # The standard-library default queue holds only one pending socket.
+            # Leave room for short bursts from concurrent CLI invocations.
+            backlog=LISTENER_BACKLOG,
             authkey=self.token,
         )
         self._listener = listener

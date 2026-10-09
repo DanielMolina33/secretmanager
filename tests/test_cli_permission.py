@@ -43,7 +43,7 @@ class CliPermissionTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory(prefix="cli-permission-")
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="sm-")
         self.data_dir = Path(self.temp_dir.name)
         (self.data_dir / "config.json").write_text(
             json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
@@ -171,7 +171,7 @@ class CliPermissionTests(unittest.TestCase):
         cli_finished = threading.Event()
         cli_result = {}
         stderr = io.StringIO()
-        lifecycle_dir = self.data_dir / "lifecycle"
+        lifecycle_dir = self.data_dir / "l"
         lifecycle_dir.mkdir()
         (lifecycle_dir / "config.json").write_text(
             json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
