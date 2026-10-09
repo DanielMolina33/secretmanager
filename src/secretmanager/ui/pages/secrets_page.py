@@ -2,6 +2,8 @@ from datetime import datetime
 from threading import Event
 
 from PySide6.QtCore import (
+    QEvent,
+    QObject,
     QCoreApplication,
     QSignalBlocker,
     QThreadPool,
@@ -38,6 +40,20 @@ from .secrets_table_model import SecretsTableModel
 from .secrets_table_delegate import SecretsTableDelegate
 from .empty_state_view import EmptyStateView
 from ..workers.secret_list_load_worker import SecretListLoadWorker
+
+
+class _SecretOptionsClickFilter(QObject):
+    def __init__(self, trigger_rect, parent=None):
+        super().__init__(parent)
+        self._trigger_rect = trigger_rect
+
+    def eventFilter(self, watched, event):
+        if (
+            event.type() == QEvent.Type.MouseButtonPress
+            and self._trigger_rect.contains(event.globalPosition().toPoint())
+        ):
+            watched.setAttribute(Qt.WidgetAttribute.WA_NoMouseReplay)
+        return False
 
 
 class SecretsPage(QWidget):
@@ -845,10 +861,14 @@ class SecretsPage(QWidget):
             return
         self.refresh_secret_list()
 
-    def show_secret_menu(self, secret_name, global_position):
+    def show_secret_menu(self, secret_name, trigger_rect):
         if self.secret_service is None:
             return
+
         menu = RoundMenu(parent=self)
+        click_filter = _SecretOptionsClickFilter(trigger_rect, menu)
+        menu.installEventFilter(click_filter)
+        menu._trigger_click_filter = click_filter
         copy_name_action = Action(FIF.COPY, QCoreApplication.translate("SecretManager", 'ui.copy_name'), menu)
         copy_name_action.triggered.connect(
             lambda checked=False, name=secret_name: self.copy_secret(name, copy_value=False)
@@ -866,7 +886,7 @@ class SecretsPage(QWidget):
         menu.addSeparator()
         menu.addAction(edit_action)
         menu.addAction(delete_action)
-        menu.exec(global_position)
+        menu.exec(trigger_rect.bottomLeft())
 
     def copy_secret(self, secret_name, *, copy_value):
         if self.secret_service is None:

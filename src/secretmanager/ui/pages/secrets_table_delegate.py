@@ -1,4 +1,4 @@
-from PySide6.QtCore import QEvent, QPoint, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QEvent, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QStyleOptionViewItem
 from qfluentwidgets import FluentIcon as FIF, TableItemDelegate, getFont, isDarkTheme
@@ -17,7 +17,7 @@ from ...domain.expiry import EXPIRED, EXPIRING, VALID
 class SecretsTableDelegate(TableItemDelegate):
     """Paints secret rows as data while retaining QFluentWidgets row hover."""
 
-    optionsRequested = Signal(str, QPoint)
+    optionsRequested = Signal(str, QRect)
 
     _STATUS_COLORS = {
         VALID: ((15, 123, 15), (108, 203, 95), (255, 255, 255), (0, 0, 0)),
@@ -161,8 +161,11 @@ class SecretsTableDelegate(TableItemDelegate):
         view = self.parent()
         if secret_name and view is not None:
             button_rect = self._options_button_rect(option.rect)
-            global_position = view.viewport().mapToGlobal(button_rect.bottomLeft())
-            self.optionsRequested.emit(secret_name, global_position)
+            global_button_rect = QRect(
+                view.viewport().mapToGlobal(button_rect.topLeft()),
+                button_rect.size(),
+            )
+            self.optionsRequested.emit(secret_name, global_button_rect)
             return True
 
         return False
