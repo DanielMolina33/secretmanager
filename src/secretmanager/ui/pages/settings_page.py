@@ -17,6 +17,20 @@ from ...settings_config import app_config, restore_app_config_defaults
 from ..components.dialog_base import ConfirmationDialog
 
 
+def _hide_switch_state_text(card, config_item):
+    switch = card.switchButton
+    switch.setOnText("")
+    switch.setOffText("")
+
+    def clear_state_text(_value=None):
+        switch.setOnText("")
+        switch.setOffText("")
+
+    config_item.valueChanged.connect(clear_state_text)
+    card.checkedChanged.connect(clear_state_text)
+    clear_state_text()
+
+
 class SettingsPage(QWidget):
     themeChanged = Signal(int)
     micaChanged = Signal(bool)
@@ -55,6 +69,7 @@ class SettingsPage(QWidget):
             content=QCoreApplication.translate("SecretManager", 'ui.applies_a_semi_transparent_material_to_windows_and_s'),
             parent=personalization_group,
         )
+        _hide_switch_state_text(self.mica_card, app_config.micaEnabled)
         self.mica_card.switchButton.setEnabled(mica_available)
         if not mica_available:
             self.mica_card.switchButton.setToolTip(
@@ -104,7 +119,9 @@ class SettingsPage(QWidget):
             content=QCoreApplication.translate("SecretManager", 'ui.allows_copied_names_values_and_recovery_kits_to_appe'),
             parent=behavior_group,
         )
+        _hide_switch_state_text(self.clipboard_history_card, app_config.clipboardHistoryAllowed)
         behavior_group.addSettingCard(self.clipboard_history_card)
+
         self.clipboard_clear_card = ComboBoxSettingCard(
             configItem=app_config.clipboardClearAfter,
             icon=FIF.DELETE,
@@ -146,6 +163,15 @@ class SettingsPage(QWidget):
         behavior_group.addSettingCard(self.shortcut_card)
 
         security_group = SettingCardGroup(QCoreApplication.translate("SecretManager", 'ui.security'), self.scroll_widget)
+        self.cli_integration_card = SwitchSettingCard(
+            configItem=app_config.cliIntegrationEnabled,
+            icon=FIF.COMMAND_PROMPT,
+            title=QCoreApplication.translate("SecretManager", 'ui.cli_integration'),
+            content=QCoreApplication.translate("SecretManager", 'ui.cli_integration_description'),
+            parent=security_group,
+        )
+        _hide_switch_state_text(self.cli_integration_card, app_config.cliIntegrationEnabled)
+        security_group.addSettingCard(self.cli_integration_card)
         self.change_password_card = PushSettingCard(
             text=QCoreApplication.translate("SecretManager", 'ui.change'),
             icon=FIF.EDIT,
@@ -207,6 +233,7 @@ class SettingsPage(QWidget):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.enableTransparentBackground()
         page_layout.addWidget(self.scroll_area)
+        self.set_cli_integration_state(False)
         self.set_recovery_state(False, False)
 
     def _save_lock_shortcut(self) -> None:
@@ -241,6 +268,9 @@ class SettingsPage(QWidget):
         if dialog.exec():
             restore_app_config_defaults()
             self.settingsRestored.emit()
+
+    def set_cli_integration_state(self, unlocked: bool) -> None:
+        self.cli_integration_card.switchButton.setEnabled(unlocked)
 
     def set_master_password_state(self, unlocked: bool) -> None:
         self.change_password_card.button.setEnabled(unlocked)

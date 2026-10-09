@@ -31,6 +31,8 @@ class InMemorySecretRepository(SecretRepository):
         page_index: int = 0,
         page_size: int = 25,
         now: datetime | None = None,
+        include_status_counts: bool = True,
+        include_filtered_count: bool = True,
     ) -> SecretListPage:
         if page_size < 1:
             raise ValueError("page_size must be greater than zero")
@@ -48,7 +50,8 @@ class InMemorySecretRepository(SecretRepository):
                 secret.expires_at_time,
                 now=current,
             )
-            counts[secret_status] += 1
+            if include_status_counts:
+                counts[secret_status] += 1
 
             if query and query not in secret.name.lower() and query not in secret.note.lower():
                 continue
@@ -60,9 +63,12 @@ class InMemorySecretRepository(SecretRepository):
             key=lambda item: item[0].name.casefold(),
             reverse=descending,
         )
-        filtered_count = len(matching)
-        total_pages = (filtered_count + page_size - 1) // page_size
-        normalized_index = min(max(0, page_index), max(0, total_pages - 1))
+        filtered_count = len(matching) if include_filtered_count else None
+        if filtered_count is None:
+            normalized_index = max(0, page_index)
+        else:
+            total_pages = (filtered_count + page_size - 1) // page_size
+            normalized_index = min(max(0, page_index), max(0, total_pages - 1))
         start = normalized_index * page_size
         selected = matching[start:start + page_size]
 
@@ -78,9 +84,9 @@ class InMemorySecretRepository(SecretRepository):
                 )
                 for secret, secret_status in selected
             ),
-            total_count=len(self._secrets),
+            total_count=len(self._secrets) if include_status_counts else None,
             filtered_count=filtered_count,
-            status_counts=counts,
+            status_counts=counts if include_status_counts else None,
             page_index=normalized_index,
         )
 
@@ -103,6 +109,19 @@ class InMemorySecretRepository(SecretRepository):
                 return secret
 
         return None
+
+    def name_exists_case_insensitive(
+        self,
+        name: str,
+        *,
+        excluding_name: str | None = None,
+    ) -> bool:
+        normalized_name = name.casefold()
+        return any(
+            secret.name.casefold() == normalized_name
+            and secret.name != excluding_name
+            for secret in self._secrets
+        )
 
     def delete(self, name: str) -> bool:
         secret = self.get(name)

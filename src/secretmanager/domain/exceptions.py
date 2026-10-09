@@ -12,3 +12,6 @@ class DuplicateSecretError(SecretError):
 
 class EmptySecretValueError(SecretError):
     """Raised when a secret value is empty."""
+
+class SecretNoteTooLongError(SecretError):
+    """Raised when a secret note exceeds its allowed length."""

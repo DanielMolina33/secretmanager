@@ -6,12 +6,13 @@ from ..domain.exceptions import (
     DuplicateSecretError,
     EmptySecretValueError,
     InvalidSecretNameError,
+    SecretNoteTooLongError,
 )
-from ..domain.secret import Secret
+from ..domain.secret import MAX_SECRET_NAME_LENGTH, MAX_SECRET_NOTE_LENGTH, Secret
 from ..domain.secret_listing import SecretListPage
 
 
-SECRET_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+SECRET_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 class SecretService:
@@ -29,9 +30,10 @@ class SecretService:
     ) -> Secret:
         self._validate_name(name)
         self._validate_value(value)
+        self._validate_note(note)
         expires_at_time = self._normalize_expiry(expires_on, expires_at_time)
 
-        if self.get(name) is not None:
+        if self.repository.name_exists_case_insensitive(name):
             raise DuplicateSecretError(
                 f"A secret named '{name}' already exists."
             )
@@ -61,6 +63,8 @@ class SecretService:
         page_index: int = 0,
         page_size: int = 25,
         now: datetime | None = None,
+        include_status_counts: bool = True,
+        include_filtered_count: bool = True,
     ) -> SecretListPage:
         return self.repository.list_page(
             search_text=search_text,
@@ -69,6 +73,8 @@ class SecretService:
             page_index=page_index,
             page_size=page_size,
             now=now,
+            include_status_counts=include_status_counts,
+            include_filtered_count=include_filtered_count,
         )
 
     def next_status_transition(
@@ -98,9 +104,12 @@ class SecretService:
 
         self._validate_name(name)
         self._validate_value(value)
+        self._validate_note(note)
         expires_at_time = self._normalize_expiry(expires_on, expires_at_time)
 
-        if name != current_name and self.get(name) is not None:
+        if self.repository.name_exists_case_insensitive(
+            name, excluding_name=current_name
+        ):
             raise DuplicateSecretError(
                 f"A secret named '{name}' already exists."
             )
@@ -131,7 +140,10 @@ class SecretService:
                 "Secret name cannot be empty."
             )
 
-        if not SECRET_NAME_PATTERN.fullmatch(name):
+        if (
+            len(name) > MAX_SECRET_NAME_LENGTH
+            or not SECRET_NAME_PATTERN.fullmatch(name)
+        ):
             raise InvalidSecretNameError(
                 "Secret name must be a valid environment variable name."
             )
@@ -142,6 +154,13 @@ class SecretService:
             raise EmptySecretValueError(
                 "Secret value cannot be empty."
             )
+    @staticmethod
+    def _validate_note(note: str) -> None:
+        if len(note) > MAX_SECRET_NOTE_LENGTH:
+            raise SecretNoteTooLongError(
+                f"Secret notes cannot exceed {MAX_SECRET_NOTE_LENGTH} characters."
+            )
+
     @staticmethod
     def _normalize_expiry(
         expires_on: date | None,

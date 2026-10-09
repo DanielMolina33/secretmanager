@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -12,7 +13,6 @@ import sys
 from pathlib import Path
 
 from .domain.expiry import EXPIRED, EXPIRING
-from .ipc import CliPermissionDeniedError, IpcRequestCancelledError, request_secrets
 from .paths import get_data_dir
 
 
@@ -48,25 +48,43 @@ def main(argv: list[str] | None = None) -> int:
         print("A command must follow --.", file=sys.stderr)
         return 2
 
-    names = options.use
-    if len(set(names)) != len(names):
-        print("Secret names in --use must be unique.", file=sys.stderr)
-        return 2
-    invalid = [name for name in names if not _ENVIRONMENT_NAME.fullmatch(name)]
+    requested_names = options.use
+    invalid = [name for name in requested_names if not _ENVIRONMENT_NAME.fullmatch(name)]
     if invalid:
         print("A requested secret name is not a valid environment variable name.", file=sys.stderr)
         return 2
+    names = [name.upper() for name in requested_names]
+    if len(set(names)) != len(names):
+        print("Secret names in --use must be unique.", file=sys.stderr)
+        return 2
+
+    if not _cli_integration_enabled():
+        print(
+            "CLI integration is disabled. Enable it in SecretManager settings.",
+            file=sys.stderr,
+        )
+        return 1
+
+    from .ipc import (
+        CliPermissionDeniedError,
+        IpcRequestCancelledError,
+        request_secrets,
+    )
 
     try:
         grants = request_secrets(get_data_dir(), names)
     except IpcRequestCancelledError:
         print(
-            "The vault was locked or closed; command not started.",
+            "The vault was locked or closed, or CLI integration was disabled; "
+            "command not started.",
             file=sys.stderr,
         )
         return 1
     except FileNotFoundError:
-        print("The vault GUI must be open and unlocked before using the CLI.", file=sys.stderr)
+        print(
+            "The vault GUI must be open and unlocked, and CLI integration must be enabled in settings.",
+            file=sys.stderr,
+        )
         return 1
     except KeyError as error:
         print(f"Secret not found: {error.args[0]}.", file=sys.stderr)
@@ -103,6 +121,21 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as error:
         print(f"Unable to start the requested command: {error}", file=sys.stderr)
         return 1
+
+
+def _cli_integration_enabled() -> bool:
+    """Read the opt-in flag without importing GUI settings or IPC modules."""
+    try:
+        config = json.loads(
+            (get_data_dir() / "config.json").read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return False
+
+    if not isinstance(config, dict):
+        return False
+    group = config.get("SecretManager")
+    return isinstance(group, dict) and group.get("CliIntegrationEnabled") is True
 
 
 def _interrupt_child(process: subprocess.Popen[bytes]) -> None:

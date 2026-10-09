@@ -17,10 +17,10 @@ class SecretSummary:
 
 @dataclass(frozen=True)
 class SecretListPage:
-    """One bounded page plus counts used by the secrets view."""
+    """One bounded page with optional counts for the secrets view."""
 
     items: tuple[SecretSummary, ...]
-    total_count: int
-    filtered_count: int
-    status_counts: Mapping[str, int]
+    total_count: int | None
+    filtered_count: int | None
+    status_counts: Mapping[str, int] | None
     page_index: int

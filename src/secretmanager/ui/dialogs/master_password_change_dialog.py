@@ -1,4 +1,5 @@
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QWidget
 from ...localization.localization import master_password_policy_text
 from qfluentwidgets import CaptionLabel, PasswordLineEdit, SubtitleLabel
 
@@ -45,6 +46,10 @@ class MasterPasswordChangeDialog(AppMessageBoxBase):
         self.viewLayout.addWidget(self.confirm_input)
         self.viewLayout.addWidget(self.confirm_error)
         self.viewLayout.addWidget(self.operation_error)
+        QWidget.setTabOrder(self.current_input, self.new_password_input)
+        QWidget.setTabOrder(self.new_password_input, self.confirm_input)
+        QWidget.setTabOrder(self.confirm_input, self.yesButton)
+
         self.current_input.returnPressed.connect(self.new_password_input.setFocus)
         self.new_password_input.returnPressed.connect(self.confirm_input.setFocus)
         self.confirm_input.returnPressed.connect(self.yesButton.click)

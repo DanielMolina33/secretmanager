@@ -14,9 +14,8 @@ from .dialogs.recovery_kit_dialog import (
     RecoveryKitDisplayDialog,
 )
 from .pages.secrets_page import SecretsPage
-from .pages.settings_page import SettingsPage
+from .workers.ipc_lifecycle_thread import IpcLifecycleThread
 from .appearance.theme_manager import ThemeManager
-from ..ipc import LocalSecretServer
 from ..paths import get_data_dir
 from ..settings_config import app_config
 from ..system_events import SystemEventMonitor
@@ -47,7 +46,15 @@ class MainWindow(FluentWindow):
         )
 
         self.vault_manager = VaultManager(get_data_dir())
-        self.ipc_server = None
+        self.ipc_worker = None
+        self.ipc_lifecycle_thread = None
+        self._ipc_stop_after_start = False
+        self.ipc_monitor_timer = QTimer(self)
+        self.ipc_monitor_timer.setInterval(1000)
+        self.ipc_monitor_timer.timeout.connect(self._check_ipc_worker)
+        app_config.cliIntegrationEnabled.valueChanged.connect(
+            self._cli_integration_changed
+        )
 
         self.theme_manager = ThemeManager(self)
 
@@ -87,8 +94,12 @@ class MainWindow(FluentWindow):
         if system_event_monitor is not None:
             system_event_monitor.close()
 
+        secrets_page = getattr(self, "secrets_page", None)
+        if secrets_page is not None:
+            secrets_page.cancel_pending_page_load()
+
         database, self.database = self.database, None
-        self._stop_ipc_server()
+        self._stop_cli_integration()
         if database is not None:
             database.close()
         if self.vault is not None:
@@ -245,7 +256,7 @@ class MainWindow(FluentWindow):
 
         self.secret_service = SecretService(repository)
         self.secrets_page.set_service(self.secret_service)
-        self._start_ipc_server()
+        self._start_cli_integration()
 
         self._start_auto_lock_timer()
 
@@ -285,37 +296,194 @@ class MainWindow(FluentWindow):
         )
 
         self.secret_service = SecretService(repository)
-        self.secrets_page.set_service(self.secret_service)
-        self._start_ipc_server()
+        self.secrets_page.load_initial_page_async(self.secret_service)
 
         self._start_auto_lock_timer()
 
         return True
 
-    def _start_ipc_server(self):
-        self._stop_ipc_server()
-        if self.secret_service is None:
+    def _on_initial_secret_page_loaded(self):
+        if (
+            self.vault is None
+            or not self.vault.is_unlocked
+            or self.secret_service is None
+        ):
             return
-        server = LocalSecretServer(
-            self.vault_manager.data_dir,
-            self.secret_service.get,
+        self._start_cli_integration()
+
+    def _cli_integration_changed(self, enabled: bool) -> None:
+        if not enabled:
+            self._stop_cli_integration(asynchronous=True)
+            return
+
+        thread = self.ipc_lifecycle_thread
+        if thread is not None:
+            if thread.operation == "start":
+                self._ipc_stop_after_start = False
+            elif thread.operation == "stop":
+                thread.restart_if_enabled = True
+            return
+
+        vault = getattr(self, "vault", None)
+        if vault is not None and vault.is_unlocked:
+            self._start_cli_integration()
+
+    def _cli_integration_should_run(self) -> bool:
+        vault = getattr(self, "vault", None)
+        return bool(
+            app_config.cliIntegrationEnabled.value
+            and self.secret_service is not None
+            and vault is not None
+            and vault.is_unlocked
         )
-        try:
-            server.start()
-        except (OSError, RuntimeError):
-            # Keep the GUI vault usable if local CLI IPC cannot start.
+
+    def _start_cli_integration(self) -> None:
+        if self.ipc_lifecycle_thread is not None:
+            thread = self.ipc_lifecycle_thread
+            if thread.operation == "stop" and self._cli_integration_should_run():
+                thread.restart_if_enabled = True
+            return
+        if self.ipc_worker is not None or not self._cli_integration_should_run():
+            return
+
+        from ..ipc_process import IpcWorkerProcess
+
+        worker = IpcWorkerProcess(
+            self.vault_manager.data_dir,
+            self.vault_manager.database_path,
+            self.vault.get_dek(),
+        )
+        self.ipc_worker = worker
+        self._start_ipc_lifecycle_operation("start", worker)
+
+    def _start_ipc_lifecycle_operation(
+        self,
+        operation: str,
+        worker,
+        *,
+        restart_if_enabled: bool = True,
+    ) -> None:
+        thread = IpcLifecycleThread(operation, worker, self)
+        thread.restart_if_enabled = restart_if_enabled
+        thread.finished.connect(self._ipc_lifecycle_finished)
+        self.ipc_lifecycle_thread = thread
+        thread.start()
+
+    def _ipc_lifecycle_finished(self) -> None:
+        thread = self.sender()
+        if thread is None or thread is not self.ipc_lifecycle_thread:
+            return
+
+        operation = thread.operation
+        worker = thread.worker
+        error = thread.error
+        cleanup_error = thread.cleanup_error
+        restart_if_enabled = thread.restart_if_enabled
+        self.ipc_lifecycle_thread = None
+        thread.deleteLater()
+
+        import logging
+        logger = logging.getLogger(__name__)
+        if error is not None:
+            logger.error("Could not %s the local CLI IPC process: %s", operation, error)
+        if cleanup_error is not None:
+            logger.error("Could not clean up the local CLI IPC process: %s", cleanup_error)
+
+        if operation == "start":
+            if error is not None:
+                if self.ipc_worker is worker:
+                    self.ipc_worker = None
+                self._ipc_stop_after_start = False
+                return
+
+            if self._ipc_stop_after_start or not self._cli_integration_should_run():
+                self._ipc_stop_after_start = False
+                self._stop_cli_integration(asynchronous=True)
+                return
+
+            self.ipc_monitor_timer.start()
+            return
+
+        if restart_if_enabled and self._cli_integration_should_run():
+            self._start_cli_integration()
+
+    def _check_ipc_worker(self) -> None:
+        worker = self.ipc_worker
+        if worker is None:
+            self.ipc_monitor_timer.stop()
+            return
+        if worker.poll_startup() is False:
             import logging
-            logging.getLogger(__name__).exception(
-                "Could not start the local CLI IPC server."
+            logging.getLogger(__name__).error(
+                "The local CLI IPC process stopped unexpectedly: %s",
+                worker.failure_reason or "no startup response",
+            )
+            self._stop_cli_integration(
+                asynchronous=True,
+                restart_if_enabled=False,
+            )
+
+    def _stop_cli_integration(
+        self,
+        *,
+        asynchronous: bool = False,
+        restart_if_enabled: bool = True,
+    ) -> None:
+        timer = getattr(self, "ipc_monitor_timer", None)
+        if timer is not None:
+            timer.stop()
+
+        thread = self.ipc_lifecycle_thread
+        if thread is not None:
+            if asynchronous:
+                if thread.operation == "start":
+                    self._ipc_stop_after_start = True
+                elif thread.operation == "stop":
+                    thread.restart_if_enabled = restart_if_enabled
+                return
+
+            thread.wait()
+            if self.ipc_lifecycle_thread is thread:
+                self.ipc_lifecycle_thread = None
+                thread_worker = thread.worker
+                thread_error = thread.error
+                thread_cleanup_error = thread.cleanup_error
+                thread.deleteLater()
+                if thread_error is not None:
+                    import logging
+                    logging.getLogger(__name__).error(
+                        "Could not %s the local CLI IPC process: %s",
+                        thread.operation,
+                        thread_error,
+                    )
+                if thread_cleanup_error is not None:
+                    import logging
+                    logging.getLogger(__name__).error(
+                        "Could not clean up the local CLI IPC process: %s",
+                        thread_cleanup_error,
+                    )
+                if thread_worker is not None:
+                    thread_worker.stop()
+                if self.ipc_worker is thread_worker:
+                    self.ipc_worker = None
+            self._ipc_stop_after_start = False
+
+        worker = self.ipc_worker
+        if worker is None:
+            return
+
+        if asynchronous:
+            worker.request_stop()
+            self.ipc_worker = None
+            self._start_ipc_lifecycle_operation(
+                "stop",
+                worker,
+                restart_if_enabled=restart_if_enabled,
             )
             return
-        self.ipc_server = server
 
-    def _stop_ipc_server(self):
-        server = getattr(self, "ipc_server", None)
-        self.ipc_server = None
-        if server is not None:
-            server.close()
+        worker.stop()
+        self.ipc_worker = None
 
     def _lock_vault(self):
         vault = getattr(
@@ -339,8 +507,9 @@ class MainWindow(FluentWindow):
         if timer is not None:
             timer.stop()
 
+        self.secrets_page.cancel_pending_page_load()
         database, self.database = self.database, None
-        self._stop_ipc_server()
+        self._stop_cli_integration()
         if database is not None:
             database.close()
         self.secrets_page.reject_active_secret_dialog()
@@ -382,8 +551,9 @@ class MainWindow(FluentWindow):
         self.lock_shortcut.setEnabled(unlocked)
         self.lock_button.setVisible(unlocked)
         self.secrets_page.set_unlocked(unlocked)
-        if hasattr(self, "settings_page"):
+        if self.settings_page is not None:
             self.settings_page.set_master_password_state(unlocked)
+            self.settings_page.set_cli_integration_state(unlocked)
             self.settings_page.set_recovery_state(
                 self.vault_manager.recovery_configured,
                 unlocked,
@@ -394,26 +564,11 @@ class MainWindow(FluentWindow):
     # ------------------------------------------------------------------
 
     def _build_pages(self):
+        self.settings_page = None
         self.secrets_page = SecretsPage(self._unlock_vault_from_ui, self)
         self.secrets_page.setObjectName("secretsPage")
-        mica_available = self.isMicaEffectEnabled()
-        self.settings_page = SettingsPage(
-            self,
-            mica_available=mica_available,
-        )
-        self.settings_page.setObjectName("settingsPage")
-        self.settings_page.themeChanged.connect(self._theme_selection_changed)
-        self.settings_page.micaChanged.connect(self.setMicaEffectEnabled)
-        self.settings_page.configureRecoveryRequested.connect(self._configure_recovery_kit)
-        self.settings_page.disableRecoveryRequested.connect(self._disable_recovery_kit)
-        self.settings_page.changeMasterPasswordRequested.connect(self._change_master_password)
-        self.settings_page.settingsRestored.connect(self._settings_restored)
-        self.settings_page.set_master_password_state(
-            self.vault is not None and self.vault.is_unlocked,
-        )
-        self.settings_page.set_recovery_state(
-            self.vault_manager.recovery_configured,
-            self.vault is not None and self.vault.is_unlocked,
+        self.secrets_page.initialPageLoaded.connect(
+            self._on_initial_secret_page_loaded
         )
         self.setMicaEffectEnabled(app_config.micaEnabled.value)
 
@@ -424,10 +579,14 @@ class MainWindow(FluentWindow):
             QCoreApplication.translate("SecretManager", 'ui.secrets'),
         )
 
-        self.addSubInterface(
-            self.settings_page,
-            FIF.SETTING,
-            QCoreApplication.translate("SecretManager", 'ui.settings'),
+        settings_text = QCoreApplication.translate("SecretManager", 'ui.settings')
+        self.navigationInterface.addItem(
+            routeKey="settingsPage",
+            icon=FIF.SETTING,
+            text=settings_text,
+            onClick=self._open_settings_page,
+            position=NavigationItemPosition.TOP,
+            tooltip=settings_text,
         )
 
         self.lock_button = self.navigationInterface.addItem(
@@ -438,6 +597,45 @@ class MainWindow(FluentWindow):
             selectable=False,
             position=NavigationItemPosition.BOTTOM,
         )
+
+    def _open_settings_page(self):
+        if self.settings_page is None:
+            from .pages.settings_page import SettingsPage
+
+            settings_page = SettingsPage(
+                self,
+                mica_available=self.isMicaEffectEnabled(),
+            )
+            settings_page.setObjectName("settingsPage")
+            settings_page.setProperty("isStackedTransparent", False)
+            settings_page.themeChanged.connect(self._theme_selection_changed)
+            settings_page.micaChanged.connect(self.setMicaEffectEnabled)
+            settings_page.configureRecoveryRequested.connect(
+                self._configure_recovery_kit
+            )
+            settings_page.disableRecoveryRequested.connect(
+                self._disable_recovery_kit
+            )
+            settings_page.changeMasterPasswordRequested.connect(
+                self._change_master_password
+            )
+            settings_page.settingsRestored.connect(self._settings_restored)
+            settings_page.set_master_password_state(
+                self.vault is not None and self.vault.is_unlocked,
+            )
+            settings_page.set_cli_integration_state(
+                self.vault is not None and self.vault.is_unlocked,
+            )
+            settings_page.set_recovery_state(
+                self.vault_manager.recovery_configured,
+                self.vault is not None and self.vault.is_unlocked,
+            )
+
+            self.settings_page = settings_page
+            self.stackedWidget.addWidget(settings_page)
+
+        self.switchTo(self.settings_page)
+
     def _change_master_password(self):
         if self.vault is None or not self.vault.is_unlocked:
             return

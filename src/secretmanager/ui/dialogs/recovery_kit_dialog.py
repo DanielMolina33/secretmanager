@@ -32,6 +32,7 @@ class MasterPasswordConfirmationDialog(AppMessageBoxBase):
         self.viewLayout.addWidget(self.content_label)
         self.viewLayout.addWidget(self.password_input)
         self.viewLayout.addWidget(self.error_label)
+        QWidget.setTabOrder(self.password_input, self.yesButton)
 
     @staticmethod
     def _create_error_label():
@@ -117,6 +118,8 @@ class RecoveryKitDisplayDialog(AppMessageBoxBase):
         self.viewLayout.addWidget(code_row)
         self.viewLayout.addWidget(self.save_label)
         self.viewLayout.addWidget(self.error_label)
+        QWidget.setTabOrder(self.code_input, self.copy_button)
+        QWidget.setTabOrder(self.copy_button, self.yesButton)
 
     def clear_sensitive_data(self) -> None:
         self.code_input.clear()
@@ -160,6 +163,10 @@ class RecoveryDialog(AppMessageBoxBase):
         self.recovery_input.textChanged.connect(lambda _text: self._clear_error(self.recovery_error))
         self.new_password_input.textChanged.connect(self._on_new_password_changed)
         self.confirm_input.textChanged.connect(lambda _text: self._clear_error(self.confirm_error))
+        QWidget.setTabOrder(self.recovery_input, self.new_password_input)
+        QWidget.setTabOrder(self.new_password_input, self.confirm_input)
+        QWidget.setTabOrder(self.confirm_input, self.yesButton)
+
         self.confirm_input.returnPressed.connect(self.yesButton.click)
         self.viewLayout.addWidget(self.title_label)
         self.viewLayout.addWidget(self.description_label)

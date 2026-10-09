@@ -633,8 +633,8 @@ desde la CLI (con el comando run -- use)</translation>
     </message>
     <message>
         <location filename="../../ui/dialogs/secret_dialog.py" line="371"/>
-        <source>ui.use_a_valid_name_letters_numbers_and_underscores_it</source>
-        <translation>Usa un nombre válido: letras, números y guion bajo; no puede empezar con número.</translation>
+        <source>ui.use_a_valid_uppercase_name_letters_numbers_and_underscores_100_max</source>
+        <translation>El nombre debe estar en mayúsculas, usar solo letras, números o guion bajo, comenzar con letra o guion bajo y tener 100 caracteres como máximo.</translation>
     </message>
     <message>
         <location filename="../../ui/dialogs/secret_dialog.py" line="375"/>
@@ -645,6 +645,16 @@ desde la CLI (con el comando run -- use)</translation>
         <location filename="../../ui/dialogs/secret_dialog.py" line="378"/>
         <source>ui.enter_the_secret_value</source>
         <translation>Escribe el valor del secreto.</translation>
+    </message>
+    <message>
+        <location filename="../../ui/dialogs/secret_dialog.py" line="390"/>
+        <source>ui.secret_note_must_not_exceed_100_characters</source>
+        <translation>La nota no puede superar los 100 caracteres.</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/secrets_page.py" line="447"/>
+        <source>ui.options</source>
+        <translation>Opciones</translation>
     </message>
     <message>
         <location filename="../../ui/pages/secrets_page.py" line="80"/>
@@ -820,6 +830,28 @@ desde la CLI (con el comando run -- use)</translation>
     <message>
         <source>ui.pagination.page</source>
         <translation>Página %1 de %2</translation>
+    </message>
+    <message>
+        <source>ui.loading_secrets</source>
+        <translation>Cargando secretos&#8230;</translation>
+    </message>
+    <message>
+        <source>ui.failed_to_load_secrets</source>
+        <translation>No se pudieron cargar los secretos.</translation>
+    </message>
+    <message>
+        <source>ui.retry</source>
+        <translation>Reintentar</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/settings_page.py" line="111"/>
+        <source>ui.cli_integration</source>
+        <translation>Integración con CLI</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/settings_page.py" line="112"/>
+        <source>ui.cli_integration_description</source>
+        <translation>Inicia un proceso IPC auxiliar mientras esta opción esté activada. Al desactivarla, el proceso se cierra.</translation>
     </message>
 </context>
 </TS>

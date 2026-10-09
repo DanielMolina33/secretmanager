@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import hashlib
 import io
 import logging
@@ -44,6 +45,10 @@ class CliPermissionTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory(prefix="cli-permission-")
         self.data_dir = Path(self.temp_dir.name)
+        (self.data_dir / "config.json").write_text(
+            json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
+            encoding="utf-8",
+        )
         self.key = b"p" * 32
         self.database = Database(self.data_dir / "vault.db", self.key)
         self.database.create_tables()
@@ -167,6 +172,11 @@ class CliPermissionTests(unittest.TestCase):
         cli_result = {}
         stderr = io.StringIO()
         lifecycle_dir = self.data_dir / "lifecycle"
+        lifecycle_dir.mkdir()
+        (lifecycle_dir / "config.json").write_text(
+            json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
+            encoding="utf-8",
+        )
 
         def slow_lookup(_name):
             entered_lookup.set()
@@ -266,3 +276,4 @@ class CliPermissionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

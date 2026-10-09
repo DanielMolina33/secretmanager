@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import shutil
@@ -55,9 +56,18 @@ def _check_cli(app_root: Path, isolated_root: Path) -> None:
     data_dir = isolated_root / "data"
     env_name = "PACKAGE_SMOKE_SECRET"
     secret_value = "smoke-" + os.urandom(18).hex()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    (data_dir / "config.json").write_text(
+        json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
+        encoding="utf-8",
+    )
     server = LocalSecretServer(
         data_dir,
-        lambda name: SimpleNamespace(value=secret_value) if name == env_name else None,
+        lambda name: (
+            SimpleNamespace(value=secret_value, allow_cli=True)
+            if name == env_name
+            else None
+        ),
     )
     server.start()
     try:

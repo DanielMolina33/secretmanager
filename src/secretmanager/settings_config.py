@@ -48,6 +48,12 @@ class AppConfig(QConfig):
         False,
         BoolValidator(),
     )
+    cliIntegrationEnabled = ConfigItem(
+        "SecretManager",
+        "CliIntegrationEnabled",
+        False,
+        BoolValidator(),
+    )
     clipboardClearAfter = OptionsConfigItem(
         "SecretManager",
         "ClipboardClearAfterSeconds",
@@ -218,6 +224,7 @@ def restore_app_config_defaults():
         app_config.language,
         app_config.micaEnabled,
         app_config.clipboardHistoryAllowed,
+        app_config.cliIntegrationEnabled,
         app_config.clipboardClearAfter,
         app_config.autoLockMinutes,
         app_config.lockShortcut,

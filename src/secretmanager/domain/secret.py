@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from datetime import date, time
 
+MAX_SECRET_NAME_LENGTH = 100
+MAX_SECRET_NOTE_LENGTH = 100
+
 @dataclass
 class Secret:
     name: str

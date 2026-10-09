@@ -29,6 +29,35 @@ MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 MAX_SECRET_NAMES = 128
 
 
+def _mark_token_hidden_on_windows(path: Path) -> None:
+    """Best-effort Windows hidden attribute for the local IPC token."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        get_attributes = kernel32.GetFileAttributesW
+        get_attributes.argtypes = (wintypes.LPCWSTR,)
+        get_attributes.restype = wintypes.DWORD
+        set_attributes = kernel32.SetFileAttributesW
+        set_attributes.argtypes = (wintypes.LPCWSTR, wintypes.DWORD)
+        set_attributes.restype = wintypes.BOOL
+
+        attributes = get_attributes(str(path))
+        if attributes == 0xFFFFFFFF:
+            return
+
+        # Keep existing attributes while replacing FILE_ATTRIBUTE_NORMAL.
+        attributes = (attributes & ~0x80) | 0x02
+        set_attributes(str(path), attributes)
+    except (AttributeError, OSError):
+        # Hiding is cosmetic and must not prevent CLI IPC from starting.
+        pass
+
+
 @dataclass(frozen=True)
 class SecretGrant:
     value: str
@@ -149,21 +178,32 @@ class LocalSecretServer:
             family=self.family,
             authkey=self.token,
         )
+        self._listener = listener
         try:
             if self.family == "AF_UNIX":
                 Path(self.address).chmod(0o600)
             self._write_token()
+            self._thread = threading.Thread(
+                target=self._serve,
+                name="secretmanager-local-ipc-listener",
+                daemon=True,
+            )
+            self._thread.start()
         except Exception:
-            listener.close()
+            self._stopping.set()
+            self._listener = None
+            try:
+                listener.close()
+            except OSError:
+                pass
+            thread = self._thread
+            if thread is not None and thread.is_alive():
+                thread.join()
+            try:
+                self._remove_endpoint_files()
+            except OSError:
+                pass
             raise
-
-        self._listener = listener
-        self._thread = threading.Thread(
-            target=self._serve,
-            name="secretmanager-local-ipc-listener",
-            daemon=True,
-        )
-        self._thread.start()
 
     def _write_token(self) -> None:
         flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
@@ -177,6 +217,8 @@ class LocalSecretServer:
                 os.fsync(descriptor)
         finally:
             os.close(descriptor)
+
+        _mark_token_hidden_on_windows(self.token_path)
 
     def _remove_stale_socket(self) -> None:
         path = Path(self.address)
@@ -345,20 +387,26 @@ class LocalSecretServer:
                 listener.close()
             self._listener = None
 
-        try:
-            self.token_path.unlink()
-        except FileNotFoundError:
-            pass
-        if self.family == "AF_UNIX":
-            try:
-                Path(self.address).unlink()
-            except FileNotFoundError:
-                pass
+        self._remove_endpoint_files()
 
         with self._state_lock:
             self._transport_closed = True
             if not self._workers:
                 self._closed_event.set()
+
+    def _remove_endpoint_files(self) -> None:
+        try:
+            self.token_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        if self.family == "AF_UNIX":
+            path = Path(self.address)
+            try:
+                if stat.S_ISSOCK(path.lstat().st_mode):
+                    path.unlink()
+            except FileNotFoundError:
+                pass
 
     def wait_closed(self, timeout: float | None = None) -> bool:
         """Wait for interrupted request workers to finish unwinding."""

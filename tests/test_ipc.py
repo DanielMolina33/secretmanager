@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -24,6 +25,10 @@ class PhaseZeroIpcTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.data_dir = Path(self.temp_dir.name)
+        (self.data_dir / "config.json").write_text(
+            json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
+            encoding="utf-8",
+        )
         self.sample_value = "phase0-sample-9f43c1"
         self.encryption_key = b"k" * 32
         self.database = Database(
@@ -81,16 +86,59 @@ class PhaseZeroIpcTests(unittest.TestCase):
 
     def test_untrusted_client_without_token_is_rejected(self):
         address, family = _endpoint(self.data_dir)
-        with self.assertRaises(AuthenticationError):
-            with Client(address, family=family, authkey=b"x" * 32):
-                pass
-
+        client_code = (
+            "import sys\n"
+            "from multiprocessing.connection import AuthenticationError, Client\n"
+            "try:\n"
+            "    Client(sys.argv[1], family=sys.argv[2], authkey=b'x' * 32)\n"
+            "except AuthenticationError:\n"
+            "    raise SystemExit(0)\n"
+            "raise SystemExit(1)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", client_code, address, family],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
     def test_no_secret_value_is_written_to_data_directory(self):
-        expected_names = {".ipc-token", "vault.db"}
+        expected_names = {".ipc-token", "vault.db", "config.json"}
         if self.server.family == "AF_UNIX":
             expected_names.add("secretmanager.sock")
         self.assertEqual({path.name for path in self.data_dir.iterdir()}, expected_names)
-        self.assertNotEqual((self.data_dir / ".ipc-token").read_bytes(), self.sample_value.encode())
+        token_path = self.data_dir / ".ipc-token"
+        self.assertNotEqual(token_path.read_bytes(), self.sample_value.encode())
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            get_attributes = kernel32.GetFileAttributesW
+            get_attributes.argtypes = (wintypes.LPCWSTR,)
+            get_attributes.restype = wintypes.DWORD
+            attributes = get_attributes(str(token_path))
+            self.assertNotEqual(attributes, 0xFFFFFFFF)
+            self.assertTrue(attributes & 0x02)
+
+    def test_start_failure_removes_token_and_owned_endpoint(self):
+        failed_dir = self.data_dir / "failed-start"
+        failed_dir.mkdir()
+        server = LocalSecretServer(failed_dir, self.secret_service.get)
+        write_token = server._write_token
+
+        def write_then_fail():
+            write_token()
+            raise RuntimeError("injected startup failure")
+
+        with patch.object(server, "_write_token", side_effect=write_then_fail):
+            with self.assertRaisesRegex(RuntimeError, "injected startup failure"):
+                server.start()
+
+        self.assertFalse((failed_dir / ".ipc-token").exists())
+        if server.family == "AF_UNIX":
+            self.assertFalse((failed_dir / "secretmanager.sock").exists())
 
     def test_cli_module_does_not_import_qt(self):
         environment = os.environ.copy()

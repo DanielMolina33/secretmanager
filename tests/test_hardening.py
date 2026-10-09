@@ -135,6 +135,10 @@ class PhaseSevenHardeningTests(unittest.TestCase):
             database.create_tables()
             service = SecretService(SqliteSecretRepository(database.Session, lambda: key))
             service.create("PHASE7_HOSTILE", value, allow_cli=True)
+            (data_dir / "config.json").write_text(
+                '{"SecretManager":{"CliIntegrationEnabled":true}}',
+                encoding="utf-8",
+            )
             server = LocalSecretServer(data_dir, service.get)
             server.start()
             try:
@@ -153,7 +157,9 @@ class PhaseSevenHardeningTests(unittest.TestCase):
                   for _ in range(rng.randrange(12))] for _ in range(1000)]
         def fake_request(_data_dir, names):
             return {name: SecretGrant("fuzz-safe", VALID) for name in names}
-        with (patch.object(cli, "request_secrets", side_effect=fake_request),
+        from secretmanager import ipc
+        with (patch.object(cli, "_cli_integration_enabled", return_value=True),
+              patch.object(ipc, "request_secrets", side_effect=fake_request),
               patch.object(cli, "_run_child", return_value=0),
               contextlib.redirect_stderr(io.StringIO())):
             for args in cases:
@@ -176,7 +182,9 @@ class PhaseSevenHardeningTests(unittest.TestCase):
         def run_child(command, environment):
             observed_command.extend(command)
             return original_runner(command, environment)
-        with (patch.object(cli, "request_secrets",
+        from secretmanager import ipc
+        with (patch.object(cli, "_cli_integration_enabled", return_value=True),
+              patch.object(ipc, "request_secrets",
                            return_value={"PHASE7_ENV": SecretGrant(value, VALID)}),
               patch.object(cli, "_run_child", side_effect=run_child)):
             result = cli.main(["--use", "PHASE7_ENV", "--", sys.executable,
@@ -188,5 +196,6 @@ class PhaseSevenHardeningTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

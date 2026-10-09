@@ -1,24 +1,23 @@
 from __future__ import annotations
 
-import hashlib
+import json
 import os
 from pathlib import Path
 import sys
-import threading
 import tempfile
+import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-
-from PySide6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from secretmanager import cli
-from secretmanager.ipc import IpcRequestCancelledError, request_secrets
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QApplication
 from secretmanager.database.database import Database
+from secretmanager.ipc import request_secrets
 from secretmanager.repositories.sqlite_secret_repository import SqliteSecretRepository
 from secretmanager.services.secret_service import SecretService
 from secretmanager.ui import main_window as main_window_module
@@ -39,161 +38,108 @@ class _ThemeManagerStub:
         pass
 
 
-class PhaseZeroGuiIpcTests(unittest.TestCase):
+class _SystemEventMonitorStub(QObject):
+    lockRequested = Signal()
+
+    def __init__(self, _window, parent=None):
+        super().__init__(parent)
+
+    def close(self):
+        pass
+
+
+class GuiIpcLifecycleTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
 
-    def test_unlocked_fluent_window_serves_ciphered_secret_to_cli_child(self):
-        sample_value = "phase0-gui-sample-17ac"
-        expected_digest = hashlib.sha256(sample_value.encode()).hexdigest()
-        child_code = (
-            "import hashlib,os,sys; "
-            "value=os.environ['PHASE0_GUI_KEY']; "
-            "sys.exit(0 if hashlib.sha256(value.encode()).hexdigest()==sys.argv[1] "
-            "and value not in sys.argv else 29)"
+    def _make_unlocked_window(self, data_dir: Path):
+        data_dir.mkdir(parents=True, exist_ok=True)
+        (data_dir / "config.json").write_text(
+            json.dumps({"SecretManager": {"CliIntegrationEnabled": True}}),
+            encoding="utf-8",
         )
+        manager = VaultManager(data_dir)
+        vault = manager.create("temporary master passphrase")
+        database = Database(manager.database_path, vault.get_dek())
+        database.create_tables()
+        service = SecretService(
+            SqliteSecretRepository(database.Session, vault.get_dek)
+        )
+        service.create("GUI_IPC_SECRET", "gui-ipc-value-52f1", allow_cli=True)
 
-        with tempfile.TemporaryDirectory(prefix="phase0-gui-") as directory:
-            data_dir = Path(directory)
-            vault_manager = VaultManager(data_dir)
-            vault = vault_manager.create("phase-zero temporary password")
-            database = Database(vault_manager.database_path, vault.get_dek())
-            database.create_tables()
-            service = SecretService(SqliteSecretRepository(
-                database.Session,
-                vault.get_dek,
-            ))
-            service.create(name="PHASE0_GUI_KEY", value=sample_value, allow_cli=True)
+        with (
+            patch.object(main_window_module, "get_data_dir", return_value=data_dir),
+            patch.object(main_window_module, "ThemeManager", _ThemeManagerStub),
+            patch.object(
+                main_window_module,
+                "SystemEventMonitor",
+                _SystemEventMonitorStub,
+            ),
+        ):
+            window = main_window_module.MainWindow()
 
-            with (
-                patch.object(main_window_module, "get_data_dir", return_value=data_dir),
-                patch.object(main_window_module, "ThemeManager", _ThemeManagerStub),
-            ):
-                window = main_window_module.MainWindow()
+        window.vault_manager = manager
+        window.vault = vault
+        window.database = database
+        window.secret_service = service
+        window._update_vault_ui()
+        return window, vault, database, service
 
-            window.vault_manager = vault_manager
-            window.vault = vault
-            window.database = database
-            window.secret_service = service
-            window.secrets_page.set_service(service)
-            window._update_vault_ui()
-            window._start_ipc_server()
-            self.assertIsNotNone(window.ipc_server)
-
-            with patch.object(cli, "get_data_dir", return_value=data_dir):
-                result = cli.main([
-                    "--use", "PHASE0_GUI_KEY", "--",
-                    sys.executable, "-c", child_code, expected_digest,
-                ])
-            self.assertEqual(result, 0)
-
-            server = window.ipc_server
-            window.close()
-            self.assertIsNone(window.ipc_server)
-            self.assertTrue(server.wait_closed(3))
-            self.assertFalse((data_dir / ".ipc-token").exists())
+    def _wait_for_ipc_ready(self, window):
+        window._start_cli_integration()
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
             self.app.processEvents()
+            worker = window.ipc_worker
+            if worker is not None and window.ipc_lifecycle_thread is None:
+                result = worker.poll_startup()
+                if result is True:
+                    return worker
+                if result is False:
+                    self.fail(f"IPC worker startup failed: {worker.failure_reason}")
+            time.sleep(0.05)
+        self.fail("MainWindow did not start the IPC worker within 30 seconds")
 
-
-    def test_lock_interrupts_active_database_query_and_cancels_cli(self):
-        query_started = threading.Event()
-        query_errors = []
-        request_result = {}
-        sample_value = "lifecycle-secret-value"
-
-        with tempfile.TemporaryDirectory(prefix="phase0-lock-ipc-") as directory:
+    def test_unlocked_window_starts_cli_worker_and_lock_removes_ipc_access(self):
+        with tempfile.TemporaryDirectory(prefix="gui-ipc-lifecycle-") as directory:
             data_dir = Path(directory)
-            vault_manager = VaultManager(data_dir)
-            vault = vault_manager.create("temporary password")
-            database = Database(vault_manager.database_path, vault.get_dek())
-            database.create_tables()
-            service = SecretService(SqliteSecretRepository(
-                database.Session,
-                vault.get_dek,
-            ))
-            service.create(name="LIFECYCLE_KEY", value=sample_value, allow_cli=True)
-
-            with (
-                patch.object(main_window_module, "get_data_dir", return_value=data_dir),
-                patch.object(main_window_module, "ThemeManager", _ThemeManagerStub),
-            ):
-                window = main_window_module.MainWindow()
-
-            window.vault_manager = vault_manager
-            window.vault = vault
-            window.database = database
-            window.secret_service = service
-            window.secrets_page.set_service(service)
-            window._update_vault_ui()
-            window._start_ipc_server()
-            server = window.ipc_server
-            self.assertIsNotNone(server)
-
-            original_get = service.get
-
-            def interruptible_lookup(name):
-                connection = database.engine.raw_connection()
-                try:
-                    def mark_query_running():
-                        query_started.set()
-                        return 0
-
-                    connection.set_progress_handler(mark_query_running, 1000)
-                    cursor = connection.cursor()
-                    try:
-                        cursor.execute(
-                            "WITH RECURSIVE counter(value) AS ("
-                            "VALUES(0) UNION ALL "
-                            "SELECT value + 1 FROM counter WHERE value < 100000000"
-                            ") SELECT sum(value) FROM counter"
-                        )
-                        cursor.fetchone()
-                    except Exception as error:
-                        query_errors.append(error)
-                    finally:
-                        cursor.close()
-                finally:
-                    connection.close()
-                return original_get(name)
-
-            server.get_secret = interruptible_lookup
-            database.close = Mock(wraps=database.close)
-
-            def request():
-                try:
-                    request_result["grants"] = request_secrets(
-                        data_dir,
-                        ["LIFECYCLE_KEY"],
-                    )
-                except Exception as error:
-                    request_result["error"] = error
-
-            client_thread = threading.Thread(target=request)
-            client_thread.start()
+            window, vault, database, _service = self._make_unlocked_window(data_dir)
             try:
-                self.assertTrue(query_started.wait(3))
+                with patch.object(
+                    window,
+                    "_cli_integration_should_run",
+                    return_value=True,
+                ):
+                    self._wait_for_ipc_ready(window)
+
+                grant = request_secrets(data_dir, ["GUI_IPC_SECRET"])
+                self.assertEqual(grant["GUI_IPC_SECRET"].value, "gui-ipc-value-52f1")
+
                 window._lock_vault()
+
                 self.assertFalse(vault.is_unlocked)
+                self.assertTrue(database._closed)
                 self.assertIsNone(window.database)
-                database.close.assert_called_once_with()
-                client_thread.join(3)
-                self.assertFalse(client_thread.is_alive())
-                self.assertIsInstance(
-                    request_result.get("error"),
-                    IpcRequestCancelledError,
-                )
-                self.assertNotIn("grants", request_result)
+                self.assertIsNone(window.secret_service)
+                self.assertIsNone(window.ipc_worker)
+                self.assertFalse((data_dir / ".ipc-token").exists())
+                with self.assertRaises(OSError):
+                    request_secrets(data_dir, ["GUI_IPC_SECRET"])
+
+
+                window.close()
+                self.app.processEvents()
             finally:
                 if vault.is_unlocked:
                     window._lock_vault()
-                client_thread.join(3)
+                window.close()
+                self.app.processEvents()
 
-            self.assertTrue(server.wait_closed(3))
-            self.assertTrue(query_errors)
-            self.assertIn("interrupt", str(query_errors[0]).lower())
-            self.assertFalse(database._active_connections)
-            window.close()
-            self.app.processEvents()
+
 if __name__ == "__main__":
     unittest.main()
+
+
+
+

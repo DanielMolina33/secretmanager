@@ -1,7 +1,10 @@
 """PyInstaller entry point for the Fluent desktop application."""
 
-from secretmanager.app import main
-
-
 if __name__ == "__main__":
+    from multiprocessing import freeze_support
+
+    freeze_support()
+
+    from secretmanager.app import main
+
     main()

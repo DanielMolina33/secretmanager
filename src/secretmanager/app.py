@@ -1,6 +1,8 @@
 import logging
 import sys
+from pathlib import Path
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from .instance import InstanceCoordinator
@@ -18,6 +20,9 @@ def _activate_window(window) -> None:
 def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Secret Manager")
+    icon_path = Path(__file__).parent / "resources" / "icons" / "secretmanager.png"
+    application_icon = QIcon(str(icon_path))
+    app.setWindowIcon(application_icon)
 
     instance = InstanceCoordinator()
     try:
@@ -44,6 +49,7 @@ def main() -> int:
         load_app_config()
         language_manager = LanguageManager(app, app_config.language.value)
         window = MainWindow()
+        window.setWindowIcon(application_icon)
         window.language_manager = language_manager
         instance.activated.connect(lambda: _activate_window(window))
         window.show()
@@ -52,5 +58,5 @@ def main() -> int:
         instance.close()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  
     raise SystemExit(main())

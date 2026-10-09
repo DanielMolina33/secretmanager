@@ -70,6 +70,8 @@ class SqliteSecretRepository(SecretRepository):
         page_index: int = 0,
         page_size: int = 25,
         now: datetime | None = None,
+        include_status_counts: bool = True,
+        include_filtered_count: bool = True,
     ) -> SecretListPage:
         if page_size < 1:
             raise ValueError("page_size must be greater than zero")
@@ -99,20 +101,29 @@ class SqliteSecretRepository(SecretRepository):
             filters.append(status_expression == status)
 
         with self.session_factory() as session:
-            status_rows = session.execute(
-                select(status_expression, func.count(SecretModel.id))
-                .group_by(status_expression)
-            )
-            status_counts = {VALID: 0, EXPIRING: 0, EXPIRED: 0}
-            for item_status, count in status_rows:
-                status_counts[item_status] = count
+            status_counts = None
+            total_count = None
+            if include_status_counts:
+                status_rows = session.execute(
+                    select(status_expression, func.count(SecretModel.id))
+                    .group_by(status_expression)
+                )
+                status_counts = {VALID: 0, EXPIRING: 0, EXPIRED: 0}
+                for item_status, count in status_rows:
+                    status_counts[item_status] = count
+                total_count = sum(status_counts.values())
 
-            total_count = sum(status_counts.values())
-            filtered_count = session.scalar(
-                select(func.count(SecretModel.id)).where(*filters)
-            ) or 0
-            total_pages = (filtered_count + page_size - 1) // page_size
-            normalized_index = min(max(0, page_index), max(0, total_pages - 1))
+            filtered_count = None
+            if include_filtered_count:
+                filtered_count = session.scalar(
+                    select(func.count(SecretModel.id)).where(*filters)
+                ) or 0
+
+            if filtered_count is None:
+                normalized_index = max(0, page_index)
+            else:
+                total_pages = (filtered_count + page_size - 1) // page_size
+                normalized_index = min(max(0, page_index), max(0, total_pages - 1))
 
             name_order = SecretModel.name.collate("NOCASE")
             ordering = (
@@ -192,6 +203,20 @@ class SqliteSecretRepository(SecretRepository):
             (literal(now_text) < expiration_datetime, EXPIRING),
             else_=EXPIRED,
         )
+
+    def name_exists_case_insensitive(
+        self,
+        name: str,
+        *,
+        excluding_name: str | None = None,
+    ) -> bool:
+        statement = select(SecretModel.id).where(
+            func.lower(SecretModel.name) == name.lower()
+        )
+        if excluding_name is not None:
+            statement = statement.where(SecretModel.name != excluding_name)
+        with self.session_factory() as session:
+            return session.scalar(statement.limit(1)) is not None
 
     def get(self, name: str) -> Secret | None:
         with self.session_factory() as session:

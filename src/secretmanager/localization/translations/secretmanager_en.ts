@@ -633,8 +633,8 @@ from the CLI (with the run -- use command)</translation>
     </message>
     <message>
         <location filename="../../ui/dialogs/secret_dialog.py" line="371"/>
-        <source>ui.use_a_valid_name_letters_numbers_and_underscores_it</source>
-        <translation>Use a valid name: letters, numbers, and underscores; it cannot start with a number.</translation>
+        <source>ui.use_a_valid_uppercase_name_letters_numbers_and_underscores_100_max</source>
+        <translation>Use uppercase letters, numbers, and underscores; start with a letter or underscore and use no more than 100 characters.</translation>
     </message>
     <message>
         <location filename="../../ui/dialogs/secret_dialog.py" line="375"/>
@@ -645,6 +645,16 @@ from the CLI (with the run -- use command)</translation>
         <location filename="../../ui/dialogs/secret_dialog.py" line="378"/>
         <source>ui.enter_the_secret_value</source>
         <translation>Enter the secret value.</translation>
+    </message>
+    <message>
+        <location filename="../../ui/dialogs/secret_dialog.py" line="390"/>
+        <source>ui.secret_note_must_not_exceed_100_characters</source>
+        <translation>The note cannot exceed 100 characters.</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/secrets_page.py" line="447"/>
+        <source>ui.options</source>
+        <translation>Options</translation>
     </message>
     <message>
         <location filename="../../ui/pages/secrets_page.py" line="80"/>
@@ -820,6 +830,28 @@ from the CLI (with the run -- use command)</translation>
     <message>
         <source>ui.pagination.page</source>
         <translation>Page %1 of %2</translation>
+    </message>
+    <message>
+        <source>ui.loading_secrets</source>
+        <translation>Loading secrets&#8230;</translation>
+    </message>
+    <message>
+        <source>ui.failed_to_load_secrets</source>
+        <translation>Could not load secrets.</translation>
+    </message>
+    <message>
+        <source>ui.retry</source>
+        <translation>Retry</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/settings_page.py" line="111"/>
+        <source>ui.cli_integration</source>
+        <translation>CLI integration</translation>
+    </message>
+    <message>
+        <location filename="../../ui/pages/settings_page.py" line="112"/>
+        <source>ui.cli_integration_description</source>
+        <translation>Starts a separate IPC helper process while enabled. Disabling it stops that process.</translation>
     </message>
 </context>
 </TS>

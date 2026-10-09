@@ -24,6 +24,8 @@ class SecretRepository(ABC):
         page_index: int = 0,
         page_size: int = 25,
         now: datetime | None = None,
+        include_status_counts: bool = True,
+        include_filtered_count: bool = True,
     ) -> SecretListPage:
         pass
 
@@ -37,6 +39,15 @@ class SecretRepository(ABC):
 
     @abstractmethod
     def get(self, name: str) -> Secret | None:
+        pass
+
+    @abstractmethod
+    def name_exists_case_insensitive(
+        self,
+        name: str,
+        *,
+        excluding_name: str | None = None,
+    ) -> bool:
         pass
 
     @abstractmethod

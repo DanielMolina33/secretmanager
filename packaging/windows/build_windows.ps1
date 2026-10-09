@@ -10,6 +10,9 @@ $buildRoot = Join-Path $projectRoot "build\windows-packaging"
 $sourceRoot = Join-Path $projectRoot "src"
 $translationSources = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.ts" }
 $translationBinaries = @("es", "en") | ForEach-Object { Join-Path $sourceRoot "secretmanager\localization\translations\secretmanager_$_.qm" }
+$iconDirectory = Join-Path $sourceRoot "secretmanager\resources\icons"
+$windowIcon = Join-Path $iconDirectory "secretmanager.png"
+$windowsIcon = Join-Path $iconDirectory "secretmanager.ico"
 $desktopEntry = Join-Path $PSScriptRoot "entrypoints\desktop.py"
 $cliEntry = Join-Path $PSScriptRoot "entrypoints\cli.py"
 
@@ -80,11 +83,13 @@ $commonArguments = @(
 
 $desktopArguments = $commonArguments + @(
     "--windowed",
+    "--icon", $windowsIcon,
     "--name", "SecretManager",
     "--hidden-import", "winaccent",
     "--collect-data", "qfluentwidgets",
     "--add-data", "$($translationBinaries[0]);secretmanager/localization/translations",
     "--add-data", "$($translationBinaries[1]);secretmanager/localization/translations",
+    "--add-data", "$($windowIcon);secretmanager/resources/icons",
     "--workpath", (Join-Path $buildRoot "desktop"),
     "--specpath", (Join-Path $buildRoot "spec\desktop"),
     $desktopEntry

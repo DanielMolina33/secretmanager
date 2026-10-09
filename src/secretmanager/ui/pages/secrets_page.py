@@ -1,6 +1,15 @@
 from datetime import datetime
+from threading import Event
 
-from PySide6.QtCore import QCoreApplication, QSignalBlocker, Qt, QTimer
+from PySide6.QtCore import (
+    QCoreApplication,
+    QSignalBlocker,
+    QThreadPool,
+    Qt,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QHeaderView, QStackedWidget, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action,
@@ -8,42 +17,61 @@ from qfluentwidgets import (
     CaptionLabel,
     ComboBox,
     FluentIcon as FIF,
-    InfoBadge,
-    InfoLevel,
+    IndeterminateProgressRing,
     PipsPager,
     PipsScrollButtonDisplayMode,
     PrimaryPushButton,
     RoundMenu,
     SearchLineEdit,
     SegmentedWidget,
-    TableWidget,
+    TableView,
     TitleLabel,
-    TransparentToolButton,
     qconfig,
 )
 from ...domain.exceptions import DuplicateSecretError, EmptySecretValueError, InvalidSecretNameError
-from ...domain.expiry import EXPIRED, EXPIRING, VALID, get_expiry_status
+from ...domain.expiry import EXPIRED, EXPIRING, VALID
 from ...services.clipboard import copy_text
 from ..dialogs.secret_dialog import SecretDialog
 from ..components.dialog_base import ConfirmationDialog
 from .vault_locked_view import VaultLockedView
+from .secrets_table_model import SecretsTableModel
+from .secrets_table_delegate import SecretsTableDelegate
 from .empty_state_view import EmptyStateView
+from ..workers.secret_list_load_worker import SecretListLoadWorker
 
 
 class SecretsPage(QWidget):
+    initialPageLoaded = Signal()
 
     def __init__(self, on_unlock, parent=None):
         super().__init__(parent)
         self.on_unlock = on_unlock
         self.secret_service = None
-        self._secret_rows = []
         self._secret_count = 0
         self._filtered_secret_count = 0
         self._secret_status_counts = {VALID: 0, EXPIRING: 0, EXPIRED: 0}
+        self._status_counts_stale = True
+        self._filtered_count_stale = True
+        self._filtered_count_query = None
+        self._active_page_filter_query = None
+        self._next_transition_stale = True
         self._page_index = 0
         self._page_size = 25
         self._pager_page_count = 0
         self._page_refresh_pending = False
+        self._page_load_generation = 0
+        self._page_load_workers = {}
+        self._page_load_pool = QThreadPool(self)
+        self._page_load_pool.setMaxThreadCount(1)
+        self._initial_page_loading = False
+        self._initial_page_load_failed = False
+        self._page_loading = False
+        self._page_load_failed = False
+        self._active_page_request_is_initial = False
+        self._active_page_request_shows_loading = False
+        self._active_page_request_refreshes_transition = False
+        self._active_page_request_resets_scroll = False
+        self._next_status_transition = None
 
         self._active_secret_dialog = None
         self._vault_unlocked = False
@@ -66,16 +94,270 @@ class SecretsPage(QWidget):
         outer_layout.addWidget(self._build_ui())
 
     def set_service(self, service):
+        self.cancel_pending_page_load()
         self.secret_service = service
-        self.refresh_secret_list(reset_page=True)
+        if service is None:
+            self.secret_model.set_secrets(())
+            self._secret_count = 0
+            self._filtered_secret_count = 0
+            self._secret_status_counts = {VALID: 0, EXPIRING: 0, EXPIRED: 0}
+            self._status_counts_stale = True
+            self._filtered_count_stale = True
+            self._filtered_count_query = None
+            self._active_page_filter_query = None
+            self._next_transition_stale = True
+            self._page_index = 0
+            self._next_status_transition = None
+            self._update_secret_filter_counts()
+            self._update_pagination(None)
+            self._update_page_content()
+            return
+
+        self.refresh_secret_list(reset_page=True, show_loading=False)
+
+    def load_initial_page_async(self, service):
+        self.secret_service = service
+        self._vault_unlocked = True
+        self._start_page_load(reset_page=True, show_loading=True, initial=True)
+
+    def _start_page_load(
+        self,
+        *,
+        reset_page=False,
+        show_loading=True,
+        initial=False,
+        refresh_status_counts=True,
+        refresh_filtered_count=True,
+        refresh_next_transition=True,
+        reset_scroll_to_top=False,
+    ):
+        if not hasattr(self, "secret_list") or self.secret_service is None:
+            return
+
+        for _worker, cancel_event in self._page_load_workers.values():
+            cancel_event.set()
+
+        self._status_counts_stale = (
+            self._status_counts_stale or refresh_status_counts
+        )
+        self._filtered_count_stale = (
+            self._filtered_count_stale or refresh_filtered_count
+        )
+        self._next_transition_stale = (
+            self._next_transition_stale or refresh_next_transition
+        )
+        refresh_status_counts = self._status_counts_stale
+        refresh_filtered_count = self._filtered_count_stale
+        refresh_next_transition = self._next_transition_stale
+
+        self._page_load_generation += 1
+        request_id = self._page_load_generation
+        if reset_page:
+            self._page_index = 0
+
+        if refresh_next_transition:
+            self._status_timer.stop()
+        self.secret_list.setUpdatesEnabled(True)
+        self.loading_ring.stop()
+        self.loading_ring.hide()
+        self.results_loading_ring.stop()
+        self.results_loading_ring.hide()
+        self._set_loading_error_visible(False)
+        self._set_results_error_visible(False)
+
+        self._active_page_request_is_initial = initial
+        self._active_page_request_shows_loading = show_loading
+        self._active_page_request_refreshes_transition = refresh_next_transition
+        self._active_page_request_resets_scroll = reset_scroll_to_top
+        self._initial_page_loading = initial
+        self._initial_page_load_failed = False
+        self._page_loading = show_loading and not initial
+        self._page_load_failed = False
+
+        if initial:
+            self.loading_label.show()
+            self.loading_ring.show()
+            self.loading_ring.start()
+        elif show_loading:
+            self.pagination_footer.hide()
+            self.pagination_pager.setEnabled(False)
+            self.results_loading_ring.show()
+            self.results_loading_ring.start()
+            self.results_content.setCurrentWidget(self.results_loading_view)
+        else:
+            self.pagination_pager.setEnabled(True)
+
+        self._update_page_content()
+
+        now = datetime.now()
+        query = {
+            "search_text": self.search_box.text(),
+            "status": self.secret_filter,
+            "descending": self.secret_sort.currentIndex() == 1,
+            "page_index": self._page_index,
+            "page_size": self._page_size,
+            "now": now,
+        }
+        filter_query = (query["search_text"].strip().lower(), query["status"])
+        if filter_query != self._filtered_count_query:
+            self._filtered_count_stale = True
+        refresh_filtered_count = self._filtered_count_stale
+        self._active_page_filter_query = filter_query
+        cancel_event = Event()
+        worker = SecretListLoadWorker(
+            request_id,
+            self.secret_service,
+            query,
+            cancel_event,
+            refresh_status_counts=refresh_status_counts,
+            refresh_filtered_count=refresh_filtered_count,
+            refresh_next_transition=refresh_next_transition,
+        )
+        worker.signals.succeeded.connect(self._on_page_load_succeeded)
+        worker.signals.failed.connect(self._on_page_load_failed)
+        worker.signals.finished.connect(self._release_page_load_worker)
+        self._page_load_workers[request_id] = (worker, cancel_event)
+        self._page_load_pool.start(worker)
+
+    def cancel_pending_page_load(self):
+        self._page_load_generation += 1
+        for _worker, cancel_event in self._page_load_workers.values():
+            cancel_event.set()
+
+        self._initial_page_loading = False
+        self._initial_page_load_failed = False
+        self._page_loading = False
+        self._page_load_failed = False
+        self._active_page_request_is_initial = False
+        self._active_page_request_shows_loading = False
+        self._active_page_request_refreshes_transition = False
+        self._active_page_request_resets_scroll = False
+        self._status_timer.stop()
+        self.secret_list.setUpdatesEnabled(True)
+        self.loading_ring.stop()
+        self.loading_ring.hide()
+        self.results_loading_ring.stop()
+        self.results_loading_ring.hide()
+        self._set_loading_error_visible(False)
+        self._set_results_error_visible(False)
+
+    def _set_loading_error_visible(self, visible):
+        self.load_error_label.setVisible(visible)
+        self.retry_load_button.setVisible(visible)
+
+    def _set_results_error_visible(self, visible):
+        self.results_error_label.setVisible(visible)
+        self.results_retry_button.setVisible(visible)
+
+    @Slot(int, object)
+    def _on_page_load_succeeded(self, request_id, result):
+        if request_id != self._page_load_generation or self.secret_service is None:
+            return
+
+        page, next_transition, transition_refreshed = result
+        self.secret_list.setUpdatesEnabled(False)
+        self._prepare_secret_page(page)
+        self.secret_model.set_secrets(page.items)
+        self._finish_page_load(
+            request_id,
+            page,
+            next_transition,
+            transition_refreshed,
+        )
+
+    def _finish_page_load(
+        self,
+        request_id,
+        page,
+        next_transition,
+        transition_refreshed,
+    ):
+        if request_id != self._page_load_generation:
+            return
+
+        was_initial_load = self._active_page_request_is_initial
+        reset_scroll_to_top = self._active_page_request_resets_scroll
+        self._initial_page_loading = False
+        self._initial_page_load_failed = False
+        self._page_loading = False
+        self._page_load_failed = False
+        self._active_page_request_is_initial = False
+        self._active_page_request_shows_loading = False
+        self._active_page_request_refreshes_transition = False
+        self._active_page_request_resets_scroll = False
+        self._finish_secret_list_layout()
+        if reset_scroll_to_top:
+            scroll_bar = self.secret_list.verticalScrollBar()
+            scroll_bar.setValue(scroll_bar.minimum())
+        if transition_refreshed:
+            self._next_transition_stale = False
+            self._schedule_status_timer(next_transition)
+        self.loading_ring.stop()
+        self.loading_ring.hide()
+        self.results_loading_ring.stop()
+        self.results_loading_ring.hide()
+        self._show_page_results(page)
+        self._update_page_content()
+
+        if was_initial_load:
+            self.initialPageLoaded.emit()
+
+    @Slot(int)
+    def _on_page_load_failed(self, request_id):
+        if request_id != self._page_load_generation or self.secret_service is None:
+            return
+
+        was_initial_load = self._active_page_request_is_initial
+        show_loading = self._active_page_request_shows_loading
+        refresh_next_transition = self._active_page_request_refreshes_transition
+        self._initial_page_loading = False
+        self._page_loading = False
+        self._active_page_request_is_initial = False
+        self._active_page_request_shows_loading = False
+        self._active_page_request_refreshes_transition = False
+        self._active_page_request_resets_scroll = False
+        self.loading_ring.stop()
+        self.loading_ring.hide()
+        self.results_loading_ring.stop()
+        self.results_loading_ring.hide()
+
+        if was_initial_load:
+            self._initial_page_load_failed = True
+            self.loading_label.hide()
+            self._set_loading_error_visible(True)
+            self._update_page_content()
+        elif show_loading:
+            self._page_load_failed = True
+            self._set_results_error_visible(True)
+            self.results_content.setCurrentWidget(self.results_error_view)
+            self.pagination_footer.hide()
+            self._update_page_content()
+        else:
+            # Keep the current page visible and retry a failed expiry refresh later.
+            if self._vault_unlocked and refresh_next_transition:
+                self._status_timer.start(30_000)
+
+    @Slot(int)
+    def _release_page_load_worker(self, request_id):
+        self._page_load_workers.pop(request_id, None)
+
+    def _retry_initial_page_load(self):
+        if self.secret_service is not None:
+            self.load_initial_page_async(self.secret_service)
+
+    def _retry_page_load(self):
+        if self.secret_service is not None:
+            self.refresh_secret_list()
 
     def set_unlocked(self, unlocked):
+        if not unlocked:
+            self.cancel_pending_page_load()
         self._vault_unlocked = unlocked
         self.add_button.setEnabled(unlocked)
         self.search_box.setEnabled(unlocked)
         self._update_page_content()
         if unlocked:
-            self._schedule_status_update()
+            self._schedule_status_timer(self._next_status_transition)
         else:
             self._status_timer.stop()
 
@@ -155,15 +437,27 @@ class SecretsPage(QWidget):
         controls.addWidget(self.secret_sort)
         content_layout.addLayout(controls)
         self.results_content = QStackedWidget(self.secret_list_content)
-        self.secret_list = TableWidget(self.results_content)
-        self.secret_list.setColumnCount(4)
-        self.secret_list.setHorizontalHeaderLabels([QCoreApplication.translate("SecretManager", 'ui.name'), QCoreApplication.translate("SecretManager", 'ui.status'), '', ''])
+        self.secret_list = TableView(self.results_content)
+        self.secret_model = SecretsTableModel(
+            [
+                QCoreApplication.translate("SecretManager", 'ui.name'),
+                QCoreApplication.translate("SecretManager", 'ui.status'),
+                '',
+                QCoreApplication.translate("SecretManager", 'ui.options'),
+            ],
+            self.secret_list,
+        )
+        self.secret_list.setModel(self.secret_model)
+        self.secret_table_delegate = SecretsTableDelegate(self.secret_list)
+        self.secret_list.setItemDelegate(self.secret_table_delegate)
+        self.secret_table_delegate.optionsRequested.connect(self.show_secret_menu)
         self.secret_list.setBorderVisible(True)
         self.secret_list.setBorderRadius(8)
         self.secret_list.setAlternatingRowColors(False)
         self.secret_list.setSelectionMode(self.secret_list.SelectionMode.NoSelection)
         self.secret_list.setEditTriggers(self.secret_list.EditTrigger.NoEditTriggers)
         self.secret_list.verticalHeader().hide()
+        self.secret_list.verticalHeader().setDefaultSectionSize(58)
         header = self.secret_list.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
@@ -171,8 +465,8 @@ class SecretsPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self.secret_list.setColumnWidth(0, 320)
         self.secret_list.setColumnWidth(1, 118)
-        self.secret_list.setColumnWidth(3, 48)
-        self.secret_list.cellDoubleClicked.connect(lambda row, column: self.edit_secret(self._secret_rows[row]["name"]))
+        self.secret_list.setColumnWidth(3, 100)
+        self.secret_list.doubleClicked.connect(self._on_secret_table_double_clicked)
         self.results_content.addWidget(self.secret_list)
         self.no_results_view = QWidget(self.results_content)
         no_results_layout = QVBoxLayout(self.no_results_view)
@@ -186,6 +480,57 @@ class SecretsPage(QWidget):
         no_results_layout.addWidget(no_results_label, alignment=Qt.AlignmentFlag.AlignCenter)
         no_results_layout.addStretch(1)
         self.results_content.addWidget(self.no_results_view)
+
+        self.results_loading_view = QWidget(self.results_content)
+        results_loading_layout = QVBoxLayout(self.results_loading_view)
+        results_loading_layout.setContentsMargins(24, 20, 24, 20)
+        results_loading_layout.addStretch(1)
+        self.results_loading_ring = IndeterminateProgressRing(
+            self.results_loading_view,
+            start=False,
+        )
+        self.results_loading_ring.setFixedSize(40, 40)
+        results_loading_layout.addWidget(
+            self.results_loading_ring,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        results_loading_label = BodyLabel(
+            QCoreApplication.translate("SecretManager", "ui.loading_secrets"),
+            self.results_loading_view,
+        )
+        results_loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        results_loading_layout.addWidget(
+            results_loading_label,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        results_loading_layout.addStretch(1)
+        self.results_content.addWidget(self.results_loading_view)
+
+        self.results_error_view = QWidget(self.results_content)
+        results_error_layout = QVBoxLayout(self.results_error_view)
+        results_error_layout.setContentsMargins(24, 20, 24, 20)
+        results_error_layout.addStretch(1)
+        self.results_error_label = BodyLabel(
+            QCoreApplication.translate("SecretManager", "ui.failed_to_load_secrets"),
+            self.results_error_view,
+        )
+        self.results_error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        results_error_layout.addWidget(
+            self.results_error_label,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        self.results_retry_button = PrimaryPushButton(
+            QCoreApplication.translate("SecretManager", "ui.retry"),
+            self.results_error_view,
+        )
+        self.results_retry_button.clicked.connect(self._retry_page_load)
+        results_error_layout.addWidget(
+            self.results_retry_button,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        results_error_layout.addStretch(1)
+        self.results_content.addWidget(self.results_error_view)
+        self._set_results_error_visible(False)
         content_layout.addWidget(self.results_content, 1)
 
         self.pagination_footer = QWidget(self.secret_list_content)
@@ -229,11 +574,61 @@ class SecretsPage(QWidget):
         layout.addWidget(self.secret_list_stack, 1)
 
         self.vault_locked_view = VaultLockedView(self.on_unlock, page)
+        self.loading_view = QWidget(page)
+        loading_layout = QVBoxLayout(self.loading_view)
+        loading_layout.setContentsMargins(24, 20, 24, 20)
+        loading_layout.addStretch(1)
+        self.loading_ring = IndeterminateProgressRing(self.loading_view, start=False)
+        self.loading_ring.setFixedSize(48, 48)
+        loading_layout.addWidget(
+            self.loading_ring,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        self.loading_label = BodyLabel(
+            QCoreApplication.translate("SecretManager", "ui.loading_secrets"),
+            self.loading_view,
+        )
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_layout.addWidget(
+            self.loading_label,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        self.load_error_label = BodyLabel(
+            QCoreApplication.translate("SecretManager", "ui.failed_to_load_secrets"),
+            self.loading_view,
+        )
+        self.load_error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_layout.addWidget(
+            self.load_error_label,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        self.retry_load_button = PrimaryPushButton(
+            QCoreApplication.translate("SecretManager", "ui.retry"),
+            self.loading_view,
+        )
+        self.retry_load_button.clicked.connect(self._retry_initial_page_load)
+        loading_layout.addWidget(
+            self.retry_load_button,
+            alignment=Qt.AlignmentFlag.AlignCenter,
+        )
+        loading_layout.addStretch(1)
+        self.loading_label.show()
+        self.load_error_label.hide()
+        self.retry_load_button.hide()
+
         self.secret_content = QStackedWidget(page)
         self.secret_content.addWidget(self.secret_list_view)
         self.secret_content.addWidget(self.vault_locked_view)
+        self.secret_content.addWidget(self.loading_view)
         page_layout.addWidget(self.secret_content, 1)
         return page
+
+    def _on_secret_table_double_clicked(self, index):
+        if not index.isValid() or index.column() == 3:
+            return
+        secret = self.secret_model.secret_at(index.row())
+        if secret is not None:
+            self.edit_secret(secret.name)
 
     def _update_secret_sort_icon(self, *_args):
         icon = FIF.DOWN if self.secret_sort.currentIndex() == 1 else FIF.UP
@@ -241,7 +636,12 @@ class SecretsPage(QWidget):
 
     def _on_secret_sort_changed(self, _index):
         self._update_secret_sort_icon()
-        self.refresh_secret_list(reset_page=True)
+        self.refresh_secret_list(
+            reset_page=True,
+            refresh_status_counts=False,
+            refresh_filtered_count=False,
+            refresh_next_transition=False,
+        )
 
     def _on_page_changed(self, page_index):
         if page_index == self._page_index:
@@ -255,62 +655,63 @@ class SecretsPage(QWidget):
 
     def _refresh_page_after_pager_event(self):
         self._page_refresh_pending = False
-        self.refresh_secret_list()
+        self.refresh_secret_list(
+            refresh_status_counts=False,
+            refresh_filtered_count=False,
+            refresh_next_transition=False,
+            reset_scroll_to_top=True,
+        )
 
-    def refresh_secret_list(self, *, reset_page=False):
-        if not hasattr(self, "secret_list"):
-            return
-        if reset_page:
-            self._page_index = 0
+    def refresh_secret_list(
+        self,
+        *,
+        reset_page=False,
+        show_loading=True,
+        refresh_status_counts=True,
+        refresh_filtered_count=True,
+        refresh_next_transition=True,
+        reset_scroll_to_top=False,
+    ):
+        self._start_page_load(
+            reset_page=reset_page,
+            show_loading=show_loading,
+            refresh_status_counts=refresh_status_counts,
+            refresh_filtered_count=refresh_filtered_count,
+            refresh_next_transition=refresh_next_transition,
+            reset_scroll_to_top=reset_scroll_to_top,
+        )
 
-        self._status_timer.stop()
-        self.secret_list.setUpdatesEnabled(False)
-        try:
-            self.secret_list.setRowCount(0)
-            self._secret_rows.clear()
-
-            if self.secret_service is None:
-                self._secret_count = 0
-                self._filtered_secret_count = 0
-                self._secret_status_counts = {
-                    VALID: 0,
-                    EXPIRING: 0,
-                    EXPIRED: 0,
-                }
-                self._update_secret_filter_counts()
-                self._update_pagination(None)
-                return
-
-            page = self.secret_service.list_page(
-                search_text=self.search_box.text(),
-                status=self.secret_filter,
-                descending=self.secret_sort.currentIndex() == 1,
-                page_index=self._page_index,
-                page_size=self._page_size,
-                now=datetime.now(),
-            )
+    def _prepare_secret_page(self, page):
+        if page.total_count is not None:
             self._secret_count = page.total_count
+        if page.filtered_count is not None:
             self._filtered_secret_count = page.filtered_count
+            self._filtered_count_query = self._active_page_filter_query
+            self._filtered_count_stale = False
+        if page.status_counts is not None:
             self._secret_status_counts = dict(page.status_counts)
-            self._page_index = page.page_index
+            self._status_counts_stale = False
+        self._page_index = page.page_index
 
-            for secret in page.items:
-                self.add_secret_item(secret)
+        self._update_secret_filter_counts()
+        self._update_pagination(page)
 
-            self._update_secret_filter_counts()
-            self.results_content.setCurrentWidget(
-                self.secret_list
-                if self._filtered_secret_count
-                else self.no_results_view
-            )
-            self._update_pagination(page)
-        finally:
-            QTimer.singleShot(0, self._finish_secret_list_layout)
-            self._schedule_status_update()
-            self._update_page_content()
+    def _show_page_results(self, page):
+        self.results_content.setCurrentWidget(
+            self.secret_list
+            if self._filtered_secret_count
+            else self.no_results_view
+        )
+        self._update_pagination(page)
 
     def _update_pagination(self, page):
-        filtered_count = page.filtered_count if page is not None else 0
+        if self._initial_page_loading or self._page_loading or self._page_load_failed:
+            self.pagination_footer.setVisible(False)
+            self.pagination_pager.setEnabled(False)
+            return
+
+        self.pagination_pager.setEnabled(True)
+        filtered_count = self._filtered_secret_count
         if filtered_count == 0:
             self.pagination_footer.setVisible(False)
             return
@@ -354,20 +755,28 @@ class SecretsPage(QWidget):
             self.secret_content.setCurrentWidget(self.vault_locked_view)
             return
 
-        self.secret_content.setCurrentWidget(self.secret_list_view)
-        self.secret_list_stack.setCurrentWidget(
-            self.empty_state_view if self._secret_count == 0 else self.secret_list_content
-        )
-
-    def _schedule_status_update(self):
-        self._status_timer.stop()
-        if not self._vault_unlocked or self.secret_service is None:
+        if self._initial_page_loading or self._initial_page_load_failed:
+            self.secret_content.setCurrentWidget(self.loading_view)
             return
 
-        next_transition = self.secret_service.next_status_transition(
-            now=datetime.now(),
+        self.secret_content.setCurrentWidget(self.secret_list_view)
+        has_secret_page_content = (
+            self._secret_count > 0
+            or self._page_loading
+            or self._page_load_failed
         )
-        if next_transition is None:
+        self.secret_list_stack.setCurrentWidget(
+            self.secret_list_content if has_secret_page_content else self.empty_state_view
+        )
+
+    def _schedule_status_timer(self, next_transition):
+        self._next_status_transition = next_transition
+        self._status_timer.stop()
+        if (
+            not self._vault_unlocked
+            or self.secret_service is None
+            or next_transition is None
+        ):
             return
 
         milliseconds = max(
@@ -379,7 +788,7 @@ class SecretsPage(QWidget):
 
     def _on_status_transition(self):
         if self._vault_unlocked:
-            self.refresh_secret_list()
+            self.refresh_secret_list(show_loading=False)
 
     def _finish_secret_list_layout(self):
         self.secret_list.doItemsLayout()
@@ -400,92 +809,22 @@ class SecretsPage(QWidget):
         self._search_timer.start()
 
     def _apply_search_filter(self):
-        self.refresh_secret_list(reset_page=True)
+        self.refresh_secret_list(
+            reset_page=True,
+            refresh_status_counts=False,
+            refresh_filtered_count=True,
+            refresh_next_transition=False,
+        )
 
     def _set_secret_filter(self, value):
         self.secret_filter = value
         self.secret_filter_widget.setCurrentItem(value)
-        self.refresh_secret_list(reset_page=True)
-
-    def add_secret_item(self, secret):
-        row = self.secret_list.rowCount()
-        self.secret_list.insertRow(row)
-        self.secret_list.setRowHeight(row, 58)
-        name_cell = QWidget(self.secret_list)
-        name_cell.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        name_layout = QVBoxLayout(name_cell)
-        name_layout.setContentsMargins(8, 4, 8, 4)
-        name_layout.setSpacing(2)
-        name_layout.addStretch(1)
-        name_label = BodyLabel(secret.name, name_cell)
-        name_label.setWordWrap(False)
-        name_label.setToolTip(secret.name)
-        name_layout.addWidget(name_label)
-        name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        if secret.note:
-            note_label = CaptionLabel(secret.note, name_cell)
-            note_label.setTextColor('#606060', '#d2d2d2')
-            note_label.setWordWrap(False)
-            note_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            name_layout.addWidget(note_label)
-        name_layout.addStretch(1)
-        self.secret_list.setCellWidget(row, 0, name_cell)
-        status_text, status_level = self._secret_status(secret)
-        self._secret_rows.append({
-            'name': secret.name,
-            'note': (secret.note or '').lower(),
-            'status': status_text,
-            'expires_on': secret.expires_on,
-            'expires_at_time': secret.expires_at_time,
-        })
-        status_badge = InfoBadge(
-            {
-                VALID: QCoreApplication.translate("SecretManager", "ui.status.valid"),
-                EXPIRING: QCoreApplication.translate("SecretManager", "ui.status.expiring"),
-                EXPIRED: QCoreApplication.translate("SecretManager", "ui.status.expired"),
-            }[status_text],
-            self.secret_list,
-            status_level,
+        self.refresh_secret_list(
+            reset_page=True,
+            refresh_status_counts=False,
+            refresh_filtered_count=True,
+            refresh_next_transition=False,
         )
-        status_cell = QWidget(self.secret_list)
-        status_cell.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        status_layout = QVBoxLayout(status_cell)
-        status_layout.setContentsMargins(8, 0, 8, 0)
-        status_layout.addStretch(1)
-        status_layout.addWidget(
-            status_badge,
-            alignment=Qt.AlignmentFlag.AlignHCenter,
-        )
-        status_layout.addStretch(1)
-        self.secret_list.setCellWidget(row, 1, status_cell)
-        options_cell = QWidget(self.secret_list)
-        options_layout = QVBoxLayout(options_cell)
-        options_layout.setContentsMargins(0, 0, 4, 0)
-        options_layout.addStretch(1)
-        more_button = TransparentToolButton(FIF.MORE, options_cell)
-        more_button.setFixedSize(32, 32)
-        more_button.setToolTip(QCoreApplication.translate("SecretManager", 'ui.more_options'))
-        more_button.clicked.connect(lambda checked=False, name=secret.name, button=more_button: self.show_secret_menu(name, button))
-        options_layout.addWidget(
-            more_button,
-            alignment=Qt.AlignmentFlag.AlignRight,
-        )
-        options_layout.addStretch(1)
-        self.secret_list.setCellWidget(row, 3, options_cell)
-
-    @staticmethod
-    def _secret_status(secret):
-        status = getattr(
-            secret,
-            "status",
-            get_expiry_status(secret.expires_on, secret.expires_at_time),
-        )
-        levels = {
-            VALID: InfoLevel.SUCCESS,
-            EXPIRING: InfoLevel.WARNING,
-            EXPIRED: InfoLevel.ERROR,
-        }
-        return status, levels[status]
 
     def add_secret(self):
         service = self.secret_service
@@ -506,7 +845,7 @@ class SecretsPage(QWidget):
             return
         self.refresh_secret_list()
 
-    def show_secret_menu(self, secret_name, anchor):
+    def show_secret_menu(self, secret_name, global_position):
         if self.secret_service is None:
             return
         menu = RoundMenu(parent=self)
@@ -527,7 +866,7 @@ class SecretsPage(QWidget):
         menu.addSeparator()
         menu.addAction(edit_action)
         menu.addAction(delete_action)
-        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        menu.exec(global_position)
 
     def copy_secret(self, secret_name, *, copy_value):
         if self.secret_service is None:

@@ -3,13 +3,15 @@ from datetime import date, time
 from PySide6.QtCore import QCoreApplication, QDate, QDateTime, QTime, Qt
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
+from ...domain.secret import MAX_SECRET_NAME_LENGTH
 from ...domain.exceptions import (
     DuplicateSecretError,
     EmptySecretValueError,
     InvalidSecretNameError,
+    SecretNoteTooLongError,
 )
 from qfluentwidgets import (
-    CalendarPicker,
+    FastCalendarPicker,
     CheckBox,
     FluentIcon as FIF,
     CaptionLabel,
@@ -74,6 +76,7 @@ class SecretDialog(AppMessageBoxBase):
         self.name_input.setClearButtonEnabled(
             True
         )
+        self.name_input.setMaxLength(MAX_SECRET_NAME_LENGTH)
         self.name_error = self._create_error_label()
         self.name_input.textChanged.connect(
             lambda _text: self.clear_error("name")
@@ -131,6 +134,11 @@ class SecretDialog(AppMessageBoxBase):
             QCoreApplication.translate("SecretManager", 'ui.optional_note')
         )
         self.note_input.setFixedHeight(90)
+        self.note_input.setTabChangesFocus(True)
+        self.note_error = self._create_error_label()
+        self.note_input.textChanged.connect(
+            lambda: self.clear_error("note")
+        )
 
         self.expiry_enabled = SwitchButton(
             QCoreApplication.translate("SecretManager", 'ui.set_expiration'),
@@ -146,7 +154,7 @@ class SecretDialog(AppMessageBoxBase):
         )
 
         self.expiry_date_label = CaptionLabel(QCoreApplication.translate("SecretManager", 'ui.date'), self)
-        self.expiry_date_input = CalendarPicker(self)
+        self.expiry_date_input = FastCalendarPicker(self)
         self.expiry_date_input.setDateFormat("dd/MM/yyyy")
         self.expiry_date_input.setDate(
             QDateTime.currentDateTime().date()
@@ -199,6 +207,7 @@ class SecretDialog(AppMessageBoxBase):
         self._add_field(
             QCoreApplication.translate("SecretManager", 'ui.note'),
             self.note_input,
+            self.note_error,
         )
 
         expiry_layout = QVBoxLayout()
@@ -218,12 +227,18 @@ class SecretDialog(AppMessageBoxBase):
         )
 
         expiry_layout.addWidget(
-            self.expiry_enabled
+            self.expiry_enabled,
+            0,
+            Qt.AlignmentFlag.AlignLeft,
         )
 
         expiry_layout.addWidget(self.expiry_date_label)
         expiry_layout.addWidget(self.expiry_date_input)
-        expiry_layout.addWidget(self.expiry_time_enabled)
+        expiry_layout.addWidget(
+            self.expiry_time_enabled,
+            0,
+            Qt.AlignmentFlag.AlignLeft,
+        )
         expiry_layout.addWidget(self.expiry_time_input)
 
         self.form_layout.addLayout(
@@ -264,6 +279,9 @@ class SecretDialog(AppMessageBoxBase):
                         )
                     )
 
+        QWidget.setTabOrder(self.name_input, self.value_input)
+        QWidget.setTabOrder(self.value_input, self.note_input)
+
     def _set_expiry_enabled(self, enabled):
         self.expiry_date_label.setVisible(enabled)
         self.expiry_date_input.setVisible(enabled)
@@ -281,13 +299,19 @@ class SecretDialog(AppMessageBoxBase):
         return label
 
     def clear_error(self, field):
-        label = self.name_error if field == "name" else self.value_error
+        label = {
+            "name": self.name_error,
+            "value": self.value_error,
+            "note": self.note_error,
+        }[field]
         label.clear()
         label.hide()
 
     def set_error(self, field, message):
         if field == "name":
             label, target = self.name_error, self.name_input
+        elif field == "note":
+            label, target = self.note_error, self.note_input
         else:
             label, target = self.value_error, self.value_input
         label.setText(message)
@@ -368,7 +392,7 @@ class SecretDialog(AppMessageBoxBase):
         except InvalidSecretNameError:
             self.set_error(
                 "name",
-                QCoreApplication.translate("SecretManager", 'ui.use_a_valid_name_letters_numbers_and_underscores_it'),
+                QCoreApplication.translate("SecretManager", 'ui.use_a_valid_uppercase_name_letters_numbers_and_underscores_100_max'),
             )
             return False
         except DuplicateSecretError:
@@ -376,6 +400,9 @@ class SecretDialog(AppMessageBoxBase):
             return False
         except EmptySecretValueError:
             self.set_error("value", QCoreApplication.translate("SecretManager", 'ui.enter_the_secret_value'))
+            return False
+        except SecretNoteTooLongError:
+            self.set_error("note", QCoreApplication.translate("SecretManager", 'ui.secret_note_must_not_exceed_100_characters'))
             return False
         return True
 

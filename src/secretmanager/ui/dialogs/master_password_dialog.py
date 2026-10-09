@@ -1,6 +1,8 @@
 from math import ceil
 from time import monotonic
 
+from PySide6.QtWidgets import QWidget
+
 from PySide6.QtCore import QCoreApplication, QTimer
 from ...localization.localization import master_password_policy_text
 
@@ -88,6 +90,15 @@ class MasterPasswordDialog(AppMessageBoxBase):
             self.recovery_button = HyperlinkLabel(QCoreApplication.translate("SecretManager", 'ui.forgot_your_password'), self)
             self.recovery_button.clicked.connect(self._request_recovery)
             self.viewLayout.addWidget(self.recovery_button)
+
+        if self.confirm_input is not None:
+            QWidget.setTabOrder(self.password_input, self.confirm_input)
+            QWidget.setTabOrder(self.confirm_input, self.yesButton)
+        elif recovery_available:
+            QWidget.setTabOrder(self.password_input, self.recovery_button)
+            QWidget.setTabOrder(self.recovery_button, self.yesButton)
+        else:
+            QWidget.setTabOrder(self.password_input, self.yesButton)
 
         self.password_input.returnPressed.connect(self._handle_password_enter)
         if self.confirm_input is not None:

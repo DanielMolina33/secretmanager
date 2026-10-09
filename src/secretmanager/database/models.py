@@ -3,6 +3,8 @@ from datetime import date, datetime, time
 from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, Integer, LargeBinary, String, Text, Time
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from ..domain.secret import MAX_SECRET_NAME_LENGTH, MAX_SECRET_NOTE_LENGTH
+
 
 class Base(DeclarativeBase):
     pass
@@ -11,6 +13,18 @@ class Base(DeclarativeBase):
 class SecretModel(Base):
     __tablename__ = "secrets"
     __table_args__ = (
+        CheckConstraint(
+            f"length(name) <= {MAX_SECRET_NAME_LENGTH}",
+            name="ck_secrets_name_max_length",
+        ),
+        CheckConstraint(
+            f"length(note) <= {MAX_SECRET_NOTE_LENGTH}",
+            name="ck_secrets_note_max_length",
+        ),
+        CheckConstraint(
+            "name = upper(name)",
+            name="ck_secrets_name_uppercase",
+        ),
         CheckConstraint(
             "expires_at_time IS NULL OR expires_on IS NOT NULL",
             name="ck_secrets_expiry_time_requires_date",
@@ -28,7 +42,7 @@ class SecretModel(Base):
     )
 
     name: Mapped[str] = mapped_column(
-        String(255),
+        String(MAX_SECRET_NAME_LENGTH),
         unique=True,
         nullable=False,
     )
