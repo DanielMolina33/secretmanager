@@ -66,7 +66,7 @@ class GuiIpcLifecycleTests(unittest.TestCase):
         service = SecretService(
             SqliteSecretRepository(database.Session, vault.get_dek)
         )
-        service.create("GUI_IPC_SECRET", "gui-ipc-value-52f1", allow_cli=True)
+        service.create("GUI_IPC_SECRET", "test-only-gui-ipc-secret", allow_cli=True)
 
         with (
             patch.object(main_window_module, "get_data_dir", return_value=data_dir),
@@ -114,7 +114,7 @@ class GuiIpcLifecycleTests(unittest.TestCase):
                     self._wait_for_ipc_ready(window)
 
                 grant = request_secrets(data_dir, ["GUI_IPC_SECRET"])
-                self.assertEqual(grant["GUI_IPC_SECRET"].value, "gui-ipc-value-52f1")
+                self.assertEqual(grant["GUI_IPC_SECRET"].value, "test-only-gui-ipc-secret")
 
                 window._lock_vault()
 
