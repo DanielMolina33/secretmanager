@@ -22,8 +22,12 @@ jobs:
             runner: windows-latest
           - platform: linux
             runner: ubuntu-latest
-          - platform: macos
+          - platform: macos-arm64
             runner: macos-latest
+            architecture: arm64
+          - platform: macos-x86_64
+            runner: macos-15-intel
+            architecture: x86_64
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,9 +48,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\packaging\windows\build_windows.ps1
-      - name: Build Linux/macOS package
-        if: runner.os != 'Windows'
+      - name: Build Linux package
+        if: runner.os == 'Linux'
         run: bash packaging/unix/build_unix.sh
+      - name: Build macOS package
+        if: runner.os == 'macOS'
+        run: bash packaging/unix/build_unix.sh "${{ matrix.architecture }}"
       - name: Upload Windows archive
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -65,6 +72,6 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: SecretManager-v1.0.1-alpha-macos
-          path: dist/SecretManager-v1.0.1-alpha/SecretManager-v1.0.1-alpha-macos.zip
+          name: SecretManager-v1.0.1-alpha-${{ matrix.platform }}
+          path: dist/SecretManager-v1.0.1-alpha/${{ matrix.platform }}/SecretManager-v1.0.1-alpha-${{ matrix.platform }}.zip
           if-no-files-found: error

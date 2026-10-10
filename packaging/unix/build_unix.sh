@@ -4,9 +4,34 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 release_name="SecretManager-v1.0.1-alpha"
 system_name="$(uname -s)"
+requested_macos_arch="${1:-}"
+if [[ "$#" -gt 1 ]]; then
+    echo "Usage: $0 [macos-architecture]" >&2
+    exit 2
+fi
+
 case "$system_name" in
-    Linux) platform="linux" ;;
-    Darwin) platform="macos" ;;
+    Linux)
+        if [[ -n "$requested_macos_arch" ]]; then
+            echo "A macOS architecture can only be selected on macOS." >&2
+            exit 2
+        fi
+        platform="linux"
+        macos_arch=""
+        ;;
+    Darwin)
+        host_arch="$(uname -m)"
+        macos_arch="${requested_macos_arch:-$host_arch}"
+        case "$macos_arch" in
+            arm64|x86_64) ;;
+            *) echo "Unsupported macOS architecture: $macos_arch (expected arm64 or x86_64)" >&2; exit 2 ;;
+        esac
+        if [[ "$host_arch" != "$macos_arch" ]]; then
+            echo "Build $macos_arch on a native $macos_arch runner; this runner is $host_arch." >&2
+            exit 2
+        fi
+        platform="macos-$macos_arch"
+        ;;
     *) echo "Unsupported build host: $system_name" >&2; exit 2 ;;
 esac
 
@@ -58,8 +83,8 @@ common_args=(
 )
 
 desktop_args=()
-if [[ "$platform" == "macos" ]]; then
-    desktop_args+=(--windowed --icon "$mac_icon" --target-architecture universal2 --osx-bundle-identifier "com.secretmanager.portable")
+if [[ "$system_name" == "Darwin" ]]; then
+    desktop_args+=(--windowed --icon "$mac_icon" --target-architecture "$macos_arch" --osx-bundle-identifier "com.secretmanager.portable")
 fi
 
 (cd "$project_root" && poetry run pyinstaller "${common_args[@]}" "${desktop_args[@]}" \
@@ -69,8 +94,8 @@ fi
     packaging/windows/entrypoints/desktop.py)
 
 cli_args=("${common_args[@]}")
-if [[ "$platform" == "macos" ]]; then
-    cli_args+=(--add-data "$mac_icon:secretmanager/resources/icons" --target-architecture universal2)
+if [[ "$system_name" == "Darwin" ]]; then
+    cli_args+=(--add-data "$mac_icon:secretmanager/resources/icons" --target-architecture "$macos_arch")
 fi
 cli_args+=(
     --name SecretManagerCLI
@@ -80,7 +105,7 @@ cli_args+=(
 )
 (cd "$project_root" && poetry run pyinstaller "${cli_args[@]}")
 
-if [[ "$platform" == "linux" ]]; then
+if [[ "$system_name" == "Linux" ]]; then
     test -x "$app_output/SecretManager/SecretManager"
     test -x "$app_output/SecretManagerCLI/SecretManagerCLI"
     archive="$release_root/$release_name-linux.tar.gz"
@@ -89,7 +114,7 @@ if [[ "$platform" == "linux" ]]; then
 else
     test -d "$app_output/SecretManager.app"
     test -x "$app_output/SecretManagerCLI/SecretManagerCLI"
-    archive="$release_root/$release_name-macos.zip"
+    archive="$release_root/$release_name-$platform.zip"
     rm -f "$archive"
     ditto -c -k --sequesterRsrc --keepParent "$output_root" "$archive"
 fi

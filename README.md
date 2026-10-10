@@ -46,7 +46,7 @@ The build script performs isolated GUI and CLI smoke checks. The GUI and CLI exe
 
 ## Build for Linux and macOS
 
-These builds must run on Linux and macOS hosts. The `Build SecretManager v1.0.1-alpha` workflow builds on native GitHub-hosted runners and uploads versioned archives for each platform.
+These builds must run on Linux and macOS hosts. The `Build SecretManager v1.0.1-alpha` workflow builds on native GitHub-hosted runners and uploads versioned archives. macOS has separate `arm64` and `x86_64` packages so each can include native dependencies for its target architecture.
 
 ## Source installation
 
