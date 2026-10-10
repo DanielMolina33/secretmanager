@@ -73,5 +73,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: SecretManager-v1.0.1-alpha-${{ matrix.platform }}
-          path: dist/SecretManager-v1.0.1-alpha/${{ matrix.platform }}/SecretManager-v1.0.1-alpha-${{ matrix.platform }}.zip
+          path: dist/SecretManager-v1.0.1-alpha/SecretManager-v1.0.1-alpha-${{ matrix.platform }}.zip
           if-no-files-found: error
