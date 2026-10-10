@@ -9,7 +9,7 @@ def run() -> int:
     arguments = sys.argv[1:]
     if not arguments or arguments[0] != "run":
         print(
-            "Usage: SecretManagerCLI run --use KEY [KEY ...] -- COMMAND [ARGS ...]",
+            "Usage: secretmanager run --use KEY [KEY ...] -- COMMAND [ARGS ...]",
             file=sys.stderr,
         )
         return 2

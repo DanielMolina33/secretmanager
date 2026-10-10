@@ -52,7 +52,7 @@ def _visible_titles_for_process(process_id: int) -> list[str]:
 
 
 def _check_cli(app_root: Path, isolated_root: Path) -> None:
-    cli_exe = app_root / "SecretManagerCLI" / "SecretManagerCLI.exe"
+    cli_exe = app_root / "SecretManagerCLI" / "secretmanager.exe"
     data_dir = isolated_root / "data"
     env_name = "PACKAGE_SMOKE_SECRET"
     secret_value = "smoke-" + os.urandom(18).hex()
@@ -147,7 +147,6 @@ def _check_gui(app_root: Path, isolated_root: Path) -> None:
 
     print("PASS: packaged Fluent GUI opened in the isolated portable folder.")
 
-
 def main() -> int:
     if os.name != "nt":
         raise SystemExit("Run this smoke check on Windows.")
@@ -156,7 +155,7 @@ def main() -> int:
     source_app = bundle_root / "app"
     if not (source_app / "SecretManager" / "SecretManager.exe").is_file():
         raise SystemExit(f"Packaged GUI not found under {source_app}")
-    if not (source_app / "SecretManagerCLI" / "SecretManagerCLI.exe").is_file():
+    if not (source_app / "SecretManagerCLI" / "secretmanager.exe").is_file():
         raise SystemExit(f"Packaged CLI not found under {source_app}")
 
     with tempfile.TemporaryDirectory(prefix="secretmanager-package-smoke-") as temporary:

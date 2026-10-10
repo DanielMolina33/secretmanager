@@ -118,7 +118,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $desktopExe = Join-Path $appOutput "SecretManager\SecretManager.exe"
-$cliExe = Join-Path $appOutput "SecretManagerCLI\SecretManagerCLI.exe"
+$oldCliExe = Join-Path $appOutput "SecretManagerCLI\SecretManagerCLI.exe"
+if (Test-Path -LiteralPath $oldCliExe -PathType Leaf) {
+    Move-Item -LiteralPath $oldCliExe -Destination (Join-Path $appOutput "SecretManagerCLI\secretmanager.exe") -Force
+}
+$cliExe = Join-Path $appOutput "SecretManagerCLI\secretmanager.exe"
 if (-not (Test-Path -LiteralPath $desktopExe -PathType Leaf)) {
     throw "The desktop executable was not generated: $desktopExe"
 }

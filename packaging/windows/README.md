@@ -3,7 +3,7 @@
 This build produces a portable folder containing two executables:
 
 - app\SecretManager\SecretManager.exe: Fluent desktop application, without a console window.
-- app\SecretManagerCLI\SecretManagerCLI.exe: console launcher for the run command.
+- app\SecretManagerCLI\secretmanager.exe: console launcher for the run command.
 
 The vault is stored in the data directory beside app. Keep and back up that directory with the portable build. The build script only replaces its own generated executable folders and build cache; it leaves data intact.
 
@@ -19,7 +19,7 @@ The resulting folder is dist\SecretManager. Copy the whole folder to move the ap
 Example CLI use:
 
 ~~~powershell
-.\dist\SecretManager\app\SecretManagerCLI\SecretManagerCLI.exe run --use A_TEST -- powershell
+.\dist\SecretManager\app\SecretManagerCLI\secretmanager.exe run --use A_TEST -- powershell
 ~~~
 
 The build script runs GUI and CLI smoke checks against a temporary copy of the package and temporary IPC data.

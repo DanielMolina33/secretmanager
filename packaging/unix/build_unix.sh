@@ -104,16 +104,20 @@ cli_args+=(
     packaging/windows/entrypoints/cli.py
 )
 (cd "$project_root" && poetry run pyinstaller "${cli_args[@]}")
+cli_exe="$app_output/SecretManagerCLI/SecretManagerCLI"
+if [[ -f "$cli_exe" ]]; then
+    mv "$cli_exe" "$app_output/SecretManagerCLI/secretmanager"
+fi
 
 if [[ "$system_name" == "Linux" ]]; then
     test -x "$app_output/SecretManager/SecretManager"
-    test -x "$app_output/SecretManagerCLI/SecretManagerCLI"
+    test -x "$app_output/SecretManagerCLI/secretmanager"
     archive="$release_root/$release_name-linux.tar.gz"
     rm -f "$archive"
     tar -C "$release_root" -czf "$archive" "$platform"
 else
     test -d "$app_output/SecretManager.app"
-    test -x "$app_output/SecretManagerCLI/SecretManagerCLI"
+    test -x "$app_output/SecretManagerCLI/secretmanager"
     archive="$release_root/$release_name-$platform.zip"
     rm -f "$archive"
     ditto -c -k --sequesterRsrc --keepParent "$output_root" "$archive"
