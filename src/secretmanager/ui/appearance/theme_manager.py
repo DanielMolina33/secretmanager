@@ -1,7 +1,7 @@
 from importlib import import_module
 from threading import Thread
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
 from qfluentwidgets import (
@@ -12,7 +12,6 @@ from qfluentwidgets import (
     setTheme,
     setThemeColor,
 )
-from qfluentwidgets.common.style_sheet import updateStyleSheet
 from qframelesswindow.utils import getSystemAccentColor
 
 from ...settings_config import app_config
@@ -47,10 +46,11 @@ class ThemeManager:
 
         self._signals = _ThemeSignals(parent)
         self._signals.systemColorsChanged.connect(
-            self.apply_system_accent,
+            self.schedule_system_accent,
             Qt.ConnectionType.QueuedConnection,
         )
         self._closed = False
+        self._accent_update_pending = False
         self._start_windows_color_listener()
         self.apply()
 
@@ -81,9 +81,23 @@ class ThemeManager:
                 "system": Theme.AUTO,
                 "light": Theme.LIGHT,
                 "dark": Theme.DARK,
-            }[self.mode]
+            }[self.mode],
+            lazy=True,
         )
-        self.apply_system_accent()
+        self.schedule_system_accent()
+
+    def schedule_system_accent(self):
+        """Coalesce palette notifications and apply the accent after this event."""
+        if self._closed or self._accent_update_pending:
+            return
+
+        self._accent_update_pending = True
+        QTimer.singleShot(0, self._apply_scheduled_system_accent)
+
+    def _apply_scheduled_system_accent(self):
+        self._accent_update_pending = False
+        if not self._closed:
+            self.apply_system_accent()
 
     def apply_system_accent(self):
         app = QApplication.instance()
@@ -98,8 +112,8 @@ class ThemeManager:
         else:
             accent = app.palette().color(QPalette.ColorRole.Highlight)
 
-        if accent.isValid():
-            setThemeColor(accent, save=False)
+        if accent.isValid() and accent != qconfig.themeColor.value:
+            setThemeColor(accent, save=False, lazy=True)
 
     def _windows_accent_color(self):
         if winaccent is not None:
@@ -116,9 +130,8 @@ class ThemeManager:
         return getSystemAccentColor()
 
     def _system_theme_changed(self):
-        updateStyleSheet()
-        qconfig.themeChangedFinished.emit()
-        self.apply_system_accent()
+        setTheme(Theme.AUTO, lazy=True)
+        self.schedule_system_accent()
 
     def close(self):
         self._closed = True

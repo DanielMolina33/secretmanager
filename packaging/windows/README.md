@@ -14,12 +14,12 @@ poetry install --with build
 .\packaging\windows\build_windows.ps1
 ~~~
 
-The resulting folder is dist\SecretManager. Copy the whole folder to move the application; do not copy only an .exe, because the one-folder package also needs its bundled runtime files.
+The resulting folder is `dist\SecretManager-v1.0.1-alpha\windows`. The release archive is `dist\SecretManager-v1.0.1-alpha\SecretManager-v1.0.1-alpha-windows.zip`. Copy the whole `windows` folder to move the application; do not copy only an `.exe`, because the one-folder package also needs its bundled runtime files.
 
 Example CLI use:
 
 ~~~powershell
-.\dist\SecretManager\app\SecretManagerCLI\secretmanager.exe run --use A_TEST -- powershell
+.\dist\SecretManager-v1.0.1-alpha\windows\app\SecretManagerCLI\secretmanager.exe run --use A_TEST -- powershell
 ~~~
 
 The build script runs GUI and CLI smoke checks against a temporary copy of the package and temporary IPC data.

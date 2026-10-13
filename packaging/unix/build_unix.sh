@@ -112,6 +112,12 @@ fi
 if [[ "$system_name" == "Linux" ]]; then
     test -x "$app_output/SecretManager/SecretManager"
     test -x "$app_output/SecretManagerCLI/secretmanager"
+    install -m 755 \
+        "$project_root/packaging/unix/configure_launcher.sh" \
+        "$output_root/configure_launcher.sh"
+    install -m 644 \
+        "$project_root/packaging/unix/README-linux.txt" \
+        "$output_root/README.txt"
     archive="$release_root/$release_name-linux.tar.gz"
     rm -f "$archive"
     tar -C "$release_root" -czf "$archive" "$platform"

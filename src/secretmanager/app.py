@@ -18,6 +18,8 @@ def _activate_window(window) -> None:
 
 
 def main() -> int:
+    if sys.platform.startswith("linux"):
+        QApplication.setDesktopFileName("com.secretmanager.portable")
     app = QApplication(sys.argv)
     app.setApplicationName("Secret Manager")
     icon_path = Path(__file__).parent / "resources" / "icons" / "secretmanager.png"

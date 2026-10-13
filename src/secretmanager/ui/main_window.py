@@ -118,7 +118,7 @@ class MainWindow(FluentWindow):
         """
 
         if event.type() == QEvent.Type.ApplicationPaletteChange:
-            self.theme_manager.apply_system_accent()
+            self.theme_manager.schedule_system_accent()
 
         vault = getattr(
             self,
