@@ -34,6 +34,8 @@ For version `v1.0.1-alpha`, the available archives are:
 | macOS — Apple Silicon | `SecretManager-v1.0.1-alpha-macos-arm64.zip` |
 | macOS — Intel | `SecretManager-v1.0.1-alpha-macos-x86_64.zip` |
 
+**Demo vaults:** `SecretManager-DemoVaults.zip` is available as a release asset. It contains synthetic test vaults with 100, 1,000, and 5,000 secrets. See the included README for the master password and instructions. Back up or rename your existing `data` folder before replacing it.
+
 Choose the archive that matches your operating system and processor architecture.
 
 ### Verify the download
