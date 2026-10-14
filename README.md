@@ -2,7 +2,7 @@
 
 **A portable, offline secret manager for developers.**
 
-SecretManager Portable helps you store and manage API keys, tokens, passwords, and other sensitive values locally, without relying on cloud services or online accounts.
+SecretManager Portable helps you store and manage API keys, tokens, and other sensitive values locally, without relying on cloud services or online accounts.
 
 Your vault is encrypted and stored alongside the application, making it suitable for portable use on supported desktop platforms.
 
